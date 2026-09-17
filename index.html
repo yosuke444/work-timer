@@ -1,0 +1,2160 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KOKO</title>
+<style>
+/* ===== §9 デザイン仕様: 白背景固定 / 文字サイズ4段階 / 8pxグリッド / 影なし / 角丸4px上限 ===== */
+:root{
+  --bg:#FFFFFF; --fg:#111111; --sub:#767676; --line:#E8E8E8;
+  --over:#C0392B; --rest:#2E7D5B;
+  /* TMR-039 表示倍率。文字サイズ・ボタン余白・画面余白はすべてこの変数を掛けて書く（固定pxを直接書かない） */
+  --ui-scale:1.0;
+  --f-timer:calc(min(26vw, 38vh) * var(--ui-scale));   /* 縦長の窓でもはみ出さないよう vw と vh の小さい方 */
+  --f-head:calc(32px * var(--ui-scale));
+  --f-body:calc(19px * var(--ui-scale));
+  --f-aux:calc(16px * var(--ui-scale));
+  --pad-btn-y:calc(16px * var(--ui-scale));
+  --pad-btn-x:calc(32px * var(--ui-scale));
+  --pad-edge:calc(40px * var(--ui-scale));
+  --gap-section:calc(56px * var(--ui-scale));
+  --gap-timer:calc(72px * var(--ui-scale));
+  --sp1:calc(8px * var(--ui-scale));
+  --sp2:calc(16px * var(--ui-scale));
+  --sp3:calc(24px * var(--ui-scale));
+}
+*{box-sizing:border-box}
+/* TMR-039 / AC-23 倍率を上げても横スクロールバーを出さない（あふれるのは表の中だけ） */
+html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);overflow-x:hidden;max-width:100%;}
+body{
+  font-family:system-ui,"Segoe UI","Yu Gothic UI",sans-serif;
+  font-size:var(--f-body); line-height:1.6;
+  min-height:100vh; display:flex; flex-direction:column;
+}
+button,input,select,textarea{font-family:inherit;font-size:var(--f-body);color:var(--fg);background:var(--bg);}
+button{border:1px solid var(--line);border-radius:4px;padding:var(--pad-btn-y) var(--pad-btn-x);cursor:pointer;transition:border-color 120ms ease-out;}
+button:hover{border-color:var(--fg)}
+button.quiet{border:0;padding:0;background:none;color:var(--sub);font-size:var(--f-aux);text-decoration:underline;}
+button[disabled]{color:var(--sub);border-color:var(--line);cursor:default;opacity:.5;}
+input[type=text],input[type=time],input[type=number],input[type=datetime-local],select{
+  border:1px solid var(--line);border-radius:4px;padding:var(--sp1);background:var(--bg);
+}
+input[type=range]{accent-color:#111111;width:calc(240px * var(--ui-scale));}
+h2{font-size:var(--f-head);font-weight:600;margin:0 0 var(--sp3);}
+.aux{font-size:var(--f-aux);color:var(--sub);}
+.num{font-variant-numeric:tabular-nums;}
+.row{display:flex;gap:var(--sp1);align-items:center;flex-wrap:wrap;}
+.stack{display:flex;flex-direction:column;gap:var(--sp2);}
+.block{margin-bottom:var(--gap-section)}
+
+/* TMR-005 保存できない場合の赤帯 */
+#storageWarn{display:none;background:var(--over);color:#FFFFFF;font-size:var(--f-aux);padding:var(--sp1) var(--pad-edge);}
+#storageWarn.on{display:block}
+
+#app{flex:1;display:flex;flex-direction:column;padding:0 var(--pad-edge);min-height:0;}
+.screen{display:none;flex:1;flex-direction:column;padding:var(--pad-edge) 0;}
+.screen.on{display:flex}
+.screen.pane{overflow:auto}
+
+#mainScreen{align-items:center;justify-content:center;text-align:center;}
+#label{font-size:var(--f-body);color:var(--sub);min-height:calc(24px * var(--ui-scale));}
+#overRule{display:none;border-top:1px solid var(--over);width:32%;margin:0 auto;}
+#overRule.on{display:block}
+#timer{font-size:var(--f-timer);font-weight:700;line-height:1;margin:var(--gap-timer) 0;font-variant-numeric:tabular-nums;
+  max-width:100%;white-space:nowrap;}
+#timer.over{color:var(--over);font-size:calc(var(--f-timer) * 0.8);}
+#timer.rest{color:var(--rest)}
+#hint{min-height:calc(24px * var(--ui-scale));font-size:var(--f-aux);color:var(--sub);}
+#presets{margin-top:var(--sp3)}
+#presets button{font-size:var(--f-aux);padding:var(--sp1) var(--sp2);color:var(--sub);}
+/* TMR-041【1】 作業（分）／休憩（分）／セット数 の1行。数値欄はすべて同じ幅（固定pxは書かない） */
+.setrow input[type=number]{width:calc(80px * var(--ui-scale));}
+/* TMR-041【1】 セット数が1のとき休憩欄を灰色にして無効化する */
+.setrow input[disabled]{color:var(--sub);background:#F4F4F4;border-color:var(--line);cursor:default;}
+#labelWrap{margin-top:var(--sp3)}
+
+.list{width:100%}
+.item{display:flex;gap:var(--sp2);align-items:center;padding:var(--sp1) 0;border-bottom:1px solid var(--line);}
+.item .grow{flex:1}
+.item.off{color:var(--sub)}
+
+footer{border-top:1px solid var(--line);padding:var(--sp2) var(--pad-edge);display:flex;justify-content:space-between;
+  font-size:var(--f-aux);color:var(--sub);gap:var(--sp2);}
+footer nav{display:flex;gap:var(--sp2);}
+footer nav button{border:0;padding:0;font-size:var(--f-aux);color:var(--sub);background:none;text-decoration:none;}
+footer nav button.on{color:var(--fg);font-weight:600;}
+
+/* オーバーレイ（TMR-004 / TMR-018 / TMR-033 など） */
+.overlay{position:fixed;inset:0;background:var(--bg);z-index:10;display:none;
+  flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:var(--pad-edge);}
+.overlay.on{display:flex}
+.overlay .big{font-size:var(--f-timer);font-weight:700;line-height:1;margin:var(--gap-timer) 0;font-variant-numeric:tabular-nums;}
+#unlock{z-index:40}
+#fireOverlay{z-index:30}
+#breakOverlay{z-index:20}
+#endOverlay{z-index:25}
+#handoffOverlay{z-index:28}
+#reviewOverlay{z-index:26}
+#breakOverlay .big{color:var(--rest)}
+#breakEscape{position:fixed;bottom:var(--pad-edge);left:0;right:0;font-size:calc(var(--f-body)/3);}
+#breakEscape button{font-size:calc(var(--f-body)/3);}
+
+/* TMR-039 週間ビュー・ヒートマップ・予約一覧も同じ倍率に追従させる（ここに固定pxを残さない） */
+.tablewrap{overflow-x:auto;width:100%}
+table{border-collapse:collapse;width:100%;font-size:var(--f-aux);}
+th,td{border:1px solid var(--line);padding:var(--sp1);text-align:left;vertical-align:top;
+  white-space:nowrap;}
+th{font-weight:600;color:var(--sub);}
+td.blk{background:#F4F4F4}
+table.heat td{text-align:center}
+table button.quiet{font-size:var(--f-aux)}
+</style>
+</head>
+<body>
+<div id="storageWarn">この開き方では設定が保存されません（設定のJSON書き出しをお使いください）</div>
+
+<div id="app">
+  <!-- メイン画面 -->
+  <section id="mainScreen" class="screen on">
+    <div id="label">&nbsp;</div>
+    <!-- TMR-041【4】 いま何セット目か（セット数が1のときは出さない） -->
+    <div id="setNote" class="aux num">&nbsp;</div>
+    <div id="overRule"></div>
+    <div id="timer" class="num">00:00</div>
+    <div id="hint">&nbsp;</div>
+    <div class="row" style="justify-content:center;margin-top:var(--sp3)">
+      <button id="btnStart">開始</button>
+      <span class="aux">Space</span>
+    </div>
+    <div id="presets" class="row" style="justify-content:center"></div>
+    <!-- TMR-041【1】 手動タイマーにも 作業（分）／休憩（分）／セット数 を1行で置く -->
+    <div class="row setrow" style="justify-content:center;margin-top:var(--sp3)">
+      <span class="aux">作業</span><input id="mWork" type="number" min="1" max="600" value="25"><span class="aux">分</span>
+      <span class="aux">休憩</span><input id="mBreak" type="number" min="0" max="120" value="10"><span class="aux">分</span>
+      <input id="mSets" type="number" min="1" max="12" value="1"><span class="aux">セット</span>
+    </div>
+    <!-- TMR-041【2】 合計時間（手動は開始時刻が未定なので合計だけ） -->
+    <div id="mTotal" class="aux" style="margin-top:var(--sp1)">&nbsp;</div>
+    <div id="labelWrap" class="row" style="justify-content:center">
+      <input id="labelInput" type="text" list="labelList" placeholder="今回やること（任意）" size="28">
+      <datalist id="labelList"></datalist>
+    </div>
+    <div id="calib" class="aux" style="margin-top:var(--sp1)">&nbsp;</div>
+  </section>
+
+  <!-- 予約・ルーティン画面 -->
+  <section id="plansScreen" class="screen pane">
+    <h2>予約</h2>
+    <div class="block">
+      <!-- TMR-041【1】 作業（分）／休憩（分）／セット数 を1行で横並びに置く -->
+      <div class="row setrow">
+        <input id="resAt" type="datetime-local">
+        <span class="aux">作業</span><input id="resMin" type="number" min="1" max="600" value="45"><span class="aux">分</span>
+        <span class="aux">休憩</span><input id="resBreak" type="number" min="0" max="120" value="10"><span class="aux">分</span>
+        <input id="resSets" type="number" min="1" max="12" value="1"><span class="aux">セット</span>
+        <input id="resLabel" type="text" placeholder="ラベル（任意）" size="20">
+        <button id="btnAddRes">登録</button>
+      </div>
+      <!-- TMR-041【2】 合計時間 ／ 開始→終了の見込み -->
+      <div id="resTotal" class="aux" style="margin-top:var(--sp1)">&nbsp;</div>
+      <div id="resWarn" class="aux" style="margin-top:var(--sp1)">&nbsp;</div>
+      <div id="resList" class="list" style="margin-top:var(--sp3)"></div>
+    </div>
+
+    <h2>曜日ルーティン</h2>
+    <div class="block">
+      <!-- TMR-041【1】 作業（分）／休憩（分）／セット数 を1行で横並びに置く -->
+      <div class="row setrow">
+        <span id="rtDays" class="row aux"></span>
+        <input id="rtTime" type="time" value="09:00">
+        <span class="aux">作業</span><input id="rtMin" type="number" min="1" max="600" value="90"><span class="aux">分</span>
+        <span class="aux">休憩</span><input id="rtBreak" type="number" min="0" max="120" value="10"><span class="aux">分</span>
+        <input id="rtSets" type="number" min="1" max="12" value="1"><span class="aux">セット</span>
+        <input id="rtLabel" type="text" placeholder="ラベル（任意）" size="20">
+        <button id="btnAddRoutine">登録</button>
+      </div>
+      <!-- TMR-041【2】 合計時間 ／ 開始→終了の見込み -->
+      <div id="rtTotal" class="aux" style="margin-top:var(--sp1)">&nbsp;</div>
+      <div id="rtWarn" class="aux" style="margin-top:var(--sp1)">&nbsp;</div>
+      <div id="rtList" class="list" style="margin-top:var(--sp3)"></div>
+    </div>
+  </section>
+
+  <!-- 週間ビュー -->
+  <section id="weekScreen" class="screen pane">
+    <h2>週間ビュー</h2>
+    <div id="weekTable" class="block"></div>
+    <h2>完了セッションのヒートマップ</h2>
+    <div id="heatTable" class="block"></div>
+  </section>
+
+  <!-- 設定画面 -->
+  <section id="settingsScreen" class="screen pane">
+    <h2>設定</h2>
+    <div class="stack block">
+      <!-- TMR-039 表示の大きさ（画面全体の倍率） -->
+      <label class="row">表示の大きさ <input id="setScale" type="range" min="0.8" max="1.6" step="0.05"> <span id="scaleVal" class="aux num"></span></label>
+      <label class="row">音量 <input id="setVolume" type="range" min="0" max="100"> <span id="volumeVal" class="aux num"></span></label>
+      <label class="row">音色
+        <select id="setTone">
+          <option value="sine">正弦波</option>
+          <option value="triangle">三角波</option>
+          <option value="chime">チャイム和音</option>
+        </select>
+      </label>
+      <!-- TMR-040 / TMR-042【5】 試聴は4つ。本番とまったく同じ鳴り方をして約2.9秒で自ら止まる -->
+      <div>
+        <div class="row">
+          <button class="prevBtn" data-kind="start">▶ 開始</button>
+          <button class="prevBtn" data-kind="toBreak">▶ 作業→休憩</button>
+          <button class="prevBtn" data-kind="toWork">▶ 休憩→作業</button>
+          <button class="prevBtn" data-kind="finish">▶ 終了</button>
+        </div>
+        <div id="prevNote" class="aux" style="margin-top:var(--sp1)">&nbsp;</div>
+      </div>
+      <label class="row"><input id="setAutoFs" type="checkbox"> 作業中は自動で全画面にする</label>
+      <label class="row">起動時リカバリの猶予（分） <input id="setRecovery" type="number" min="0" max="180" style="width:calc(88px * var(--ui-scale))"></label>
+      <label class="row">既定の休憩（分） <input id="setBreak" type="number" min="0" max="120" style="width:calc(88px * var(--ui-scale))"></label>
+    </div>
+    <div class="block">
+      <div class="aux" style="margin-bottom:var(--sp1)">設定・予約・ルーティン・ログをまとめて入出力します（TMR-013）</div>
+      <div class="row">
+        <button id="btnExport">JSONで書き出す</button>
+        <button id="btnImport">JSONを読み込む</button>
+        <input id="importFile" type="file" accept=".json,application/json" hidden>
+      </div>
+    </div>
+    <div class="aux">F キー = 全画面 ／ Space = 開始・一時停止 ／ Esc = リセット ／ i = 割り込みメモ</div>
+  </section>
+</div>
+
+<footer>
+  <div id="nextUp">&nbsp;</div>
+  <nav>
+    <button data-screen="mainScreen" class="on">メイン</button>
+    <button data-screen="plansScreen">予約</button>
+    <button data-screen="weekScreen">週間</button>
+    <button data-screen="settingsScreen">設定</button>
+  </nav>
+</footer>
+
+<!-- TMR-018 / TMR-019 強制起動オーバーレイ（Fullscreen API が拒否されてもこれは必ず出す） -->
+<div id="fireOverlay" class="overlay">
+  <div id="fireHandoff" class="aux" style="max-width:60%">&nbsp;</div>
+  <div id="fireLabel">&nbsp;</div>
+  <!-- TMR-041【4】 起動中画面にもセットの位置を出す -->
+  <div id="fireSetNote" class="aux num">&nbsp;</div>
+  <div id="fireTime" class="big num">00:00</div>
+  <div class="row" style="justify-content:center">
+    <button id="btnAck">了解</button>
+    <button id="btnSkip">今日はやらない</button>
+  </div>
+  <div id="skipWrap" class="row" style="justify-content:center;margin-top:var(--sp3);display:none">
+    <input id="skipReason" type="text" placeholder="理由を1行（例：来客）" size="28">
+    <button id="btnSkipOk">記録して閉じる</button>
+  </div>
+</div>
+
+<!-- TMR-031 引き継ぎメモの提示（カウントダウン前に3秒） -->
+<div id="handoffOverlay" class="overlay">
+  <div class="aux">前回の続き →</div>
+  <div id="handoffText" style="font-size:var(--f-head);margin-top:var(--sp3);max-width:70%">&nbsp;</div>
+</div>
+
+<!-- TMR-033 強制休憩オーバーレイ（作業画面に戻る手段は出さない） -->
+<div id="breakOverlay" class="overlay">
+  <div>席を立ってください</div>
+  <!-- TMR-041【4】 休憩中もいま何セット目かを出す -->
+  <div id="breakSetNote" class="aux num">&nbsp;</div>
+  <div id="breakTime" class="big num">00:00</div>
+  <!-- TMR-041【4】 [ ここで終える ] は [ 休憩を切り上げる ] と並べて小さく置く -->
+  <div id="breakEscape">
+    <button id="btnBreakOut" class="quiet">休憩を切り上げる</button>
+    <button id="btnEndHere" class="quiet" style="margin-left:var(--sp3)">ここで終える</button>
+  </div>
+</div>
+
+<!-- TMR-032 / TMR-031 セッション終了時の後始末 -->
+<div id="endOverlay" class="overlay">
+  <div id="endSummary" class="aux">&nbsp;</div>
+  <div style="margin-top:var(--gap-section)">次にここから始める</div>
+  <div class="row" style="justify-content:center;margin-top:var(--sp1)">
+    <input id="handoffInput" type="text" placeholder="1行だけ（任意・Enterで閉じる）" size="40">
+  </div>
+  <div id="inboxList" class="list" style="max-width:calc(720px * var(--ui-scale));margin-top:var(--gap-section)"></div>
+  <div style="margin-top:var(--sp3)"><button id="btnEndClose">閉じる</button></div>
+</div>
+
+<!-- TMR-034 空振りの見直し提案（日曜の初回のみ） -->
+<div id="reviewOverlay" class="overlay">
+  <div id="reviewText" style="max-width:70%">&nbsp;</div>
+  <div class="row" style="justify-content:center;margin-top:var(--gap-section)">
+    <button id="btnRevTime">時間を変える</button>
+    <button id="btnRevDays">曜日を変える</button>
+    <button id="btnRevDel">このルーティンを消す</button>
+    <button id="btnRevKeep">このままにする</button>
+  </div>
+</div>
+
+<!-- TMR-032 割り込みキャプチャ（i キー。タイマーは止めない） -->
+<div id="interruptBar" style="position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:var(--sp1) var(--pad-edge);display:none;z-index:15">
+  <input id="interruptInput" type="text" placeholder="割り込みを1行（Enterで退避）" size="40">
+  <span class="aux">タイマーは止まりません</span>
+</div>
+
+<!-- TMR-024 起動時リカバリ -->
+<div id="recoverOverlay" class="overlay">
+  <div id="recoverText">&nbsp;</div>
+  <div class="row" style="justify-content:center;margin-top:var(--sp3)">
+    <button id="btnRecStart">今から始める</button>
+    <button id="btnRecSkip">見送る</button>
+  </div>
+</div>
+
+<!-- TMR-004 サウンド解錠 -->
+<div id="unlock" class="overlay on">
+  <div>音が鳴らないと予約が無音になります。</div>
+  <div style="margin-top:var(--sp3)"><button id="btnUnlock">音を有効にする</button></div>
+  <div class="aux" style="margin-top:var(--sp3)">押すまで他の操作はできません</div>
+</div>
+
+<script>
+"use strict";
+/* ===================== CORE-START (DOM非依存 / Nodeでもそのまま動く) ===================== */
+
+// TMR-035 時計の注入（Date.now / new Date はここ以外で直接呼ばない）
+const Clock = {
+  _offsetMs: 0,
+  now() { return Date.now() + this._offsetMs; },
+  date() { return new Date(this.now()); },
+  _travel(ms) { this._offsetMs += ms; },
+  _reset() { this._offsetMs = 0; },
+  // 文字列日時の解釈もここに集約する（Date を直接使うのはこのオブジェクトの中だけ）
+  parse(s) { const d = new Date(s); return d.getTime(); },
+  atLocal(y, mo, d, h, mi) { return new Date(y, mo, d, h, mi, 0, 0).getTime(); },
+  partsOf(ms) {
+    const d = new Date(ms);
+    return { y: d.getFullYear(), mo: d.getMonth(), d: d.getDate(), day: d.getDay(), h: d.getHours(), mi: d.getMinutes(), s: d.getSeconds() };
+  }
+};
+
+// TMR-042 音の定数。フレーズの高さ・長さ・くり返し回数・間隔・音量はすべてここ1か所で決める。
+// 鳴り方を変えたいときは、この表の数字だけを直せばよい（本番も試聴も同じ表を見る）。
+const CUE = {
+  NOTE_SEC: 0.10,          // 1音の長さ
+  NOTE_GAP_SEC: 0.02,      // 音と音の間
+  PHRASE_REPEAT: 3,        // フレーズを続けて鳴らす回数（＝「かたまり」）
+  PHRASE_GAP_SEC: 0.06,    // フレーズとフレーズの間
+  BURST_REPEAT: 2,         // かたまりのくり返し回数
+  BURST_GAP_SEC: 0.55,     // かたまりとかたまりの間
+  BURST_GAINS: [0.8, 1.0], // 1かたまり目 80% / 2かたまり目 100%
+  // 音の向きで4つを聞き分ける（上がる＝これから動く／下がる＝ひと区切り）
+  PHRASES: {
+    start:   [440, 554, 659],   // ① 作業の開始        上がる3音
+    toBreak: [659, 440],        // ② 作業 → 休憩       下がる2音
+    toWork:  [440, 659],        // ③ 休憩 → 作業       上がる2音
+    finish:  [659, 554, 440]    // ④ 全セット終了      下がる3音
+  }
+};
+
+// TMR-036 ロジックとDOMの分離（この中から document / window を参照しないこと）
+const Core = {
+  // TMR-001 表示整形: 60分未満は MM:SS、60分以上は H:MM:SS
+  formatDuration(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+    const p = n => String(n).padStart(2, "0");
+    return h > 0 ? h + ":" + p(m) + ":" + p(s) : p(m) + ":" + p(s);
+  },
+
+  // TMR-002 壁時計方式: 残りは必ず endAt - now で再計算する（加算方式は禁止）
+  remainingMs(endAt, now) { return endAt - now; },
+
+  // TMR-015 残り1分は「あと1分」の文字だけを出す（TMR-042【1】で予告音は廃止した）
+  isLastMinute(remainMs) { return remainMs > 0 && remainMs <= 60000; },
+
+  /* ---------- TMR-041 セット数（DOMに触れない純粋計算） ---------- */
+  SETS_MIN: 1, SETS_MAX: 12,
+  clampSets(v) {
+    const n = Math.round(Number(v));
+    if (!isFinite(n)) return Core.SETS_MIN;
+    return Math.min(Core.SETS_MAX, Math.max(Core.SETS_MIN, n));
+  },
+  // 作業 × セット数 ＋ 休憩 × (セット数 − 1)。最後のセットのあとに休憩は入れない
+  totalMinutes(workMin, breakMin, sets) {
+    const w = Math.max(0, Number(workMin) || 0);
+    const b = Math.max(0, Number(breakMin) || 0);
+    const n = Core.clampSets(sets);
+    return w * n + b * (n - 1);
+  },
+  // 「3時間30分」「45分」
+  formatMinutesJa(min) {
+    const m = Math.max(0, Math.round(Number(min) || 0));
+    const h = Math.floor(m / 60), r = m % 60;
+    if (!h) return r + "分";
+    return r ? h + "時間" + r + "分" : h + "時間";
+  },
+  // 「9:00」（partsOf は Clock.partsOf を渡す）
+  formatClock(ms, partsOf) {
+    const p = partsOf(ms);
+    return p.h + ":" + String(p.mi).padStart(2, "0");
+  },
+  // 予定終了時刻（開始時刻 ＋ 合計時間）
+  plannedEndAt(startMs, workMin, breakMin, sets) {
+    return startMs + Core.totalMinutes(workMin, breakMin, sets) * 60000;
+  },
+  // 「合計 3時間30分 ／ 9:00 → 12:30」。startMs が null なら合計だけ（手動タイマー）
+  planSummary(workMin, breakMin, sets, startMs, partsOf) {
+    const total = Core.totalMinutes(workMin, breakMin, sets);
+    let s = "合計 " + Core.formatMinutesJa(total);
+    if (startMs !== null && startMs !== undefined && partsOf) {
+      s += " ／ " + Core.formatClock(startMs, partsOf) + " → " + Core.formatClock(Core.plannedEndAt(startMs, workMin, breakMin, sets), partsOf);
+    }
+    return s;
+  },
+  // 残りの工程だけを足した予定終了時刻。いま進行中の工程が終わる時刻 nextAt を起点にする
+  // （超過・一時停止で後ろにずれた分は nextAt に反映されて渡ってくる）
+  remainingEndAt(nextAt, mode, setIndex, setTotal, workMin, breakMin) {
+    const n = Core.clampSets(setTotal);
+    const i = Math.min(Math.max(1, setIndex), n);
+    let ms = nextAt;
+    if (mode === "break") {                       // いま休憩中 → 残りは (n - i) セットの作業と、その間の休憩
+      const worksLeft = n - i;
+      ms += worksLeft * workMin * 60000 + Math.max(0, worksLeft - 1) * breakMin * 60000;
+    } else {                                      // いま作業中 → 残りは (n - i) 組の「休憩＋作業」
+      const pairs = n - i;
+      ms += pairs * (breakMin + workMin) * 60000;
+    }
+    return ms;
+  },
+  // 「2 / 4 セット」。1セットのときは空（画面に出さない）
+  setLabel(setIndex, setTotal) {
+    const n = Core.clampSets(setTotal);
+    return n <= 1 ? "" : setIndex + " / " + n + " セット";
+  },
+  newGroupId(seed) { return "g" + Math.floor(seed).toString(36) + Math.floor(Math.random() * 1e6).toString(36); },
+
+  // TMR-041【6】 v1 → v2 の移行。壊れた値は既定で埋め、既存データは壊さない。
+  // 何か1つでも補ったら migrated:true を返し、画面に警告を出す材料にする。
+  migrateToV2(d) {
+    const out = { migrated: false, failed: false };
+    if (!d || typeof d !== "object") { out.failed = true; return out; }
+    const fixSets = list => {
+      if (!Array.isArray(list)) return;
+      for (const x of list) {
+        if (!x || typeof x !== "object") continue;
+        const s = Core.clampSets(x.sets === undefined || x.sets === null ? 1 : x.sets);
+        if (x.sets !== s) { x.sets = s; out.migrated = true; }
+      }
+    };
+    fixSets(d.reservations); fixSets(d.routines);
+    if (Array.isArray(d.sessions)) {
+      for (const s of d.sessions) {
+        if (!s || typeof s !== "object") continue;
+        if (!s.groupId) { s.groupId = s.id || Core.newGroupId(s.startedAt || 0); out.migrated = true; }
+        if (!(Number(s.setIndex) >= 1)) { s.setIndex = 1; out.migrated = true; }
+        if (!(Number(s.setTotal) >= 1)) { s.setTotal = 1; out.migrated = true; }
+      }
+    }
+    if (d.version !== 2) { d.version = 2; out.migrated = true; }
+    return out;
+  },
+
+  /* ---------- TMR-042 音の長さ（純粋計算。鳴らす処理は UI 層の playCue 1箇所だけ） ---------- */
+  cueKinds() { return Object.keys(CUE.PHRASES); },
+  phraseOf(kind) { return CUE.PHRASES[kind] || null; },
+  phraseSec(kind) {
+    const n = (Core.phraseOf(kind) || []).length;
+    return n ? n * CUE.NOTE_SEC + (n - 1) * CUE.NOTE_GAP_SEC : 0;
+  },
+  // かたまり = フレーズ3回（間 0.06秒）
+  burstSec(kind) {
+    return CUE.PHRASE_REPEAT * Core.phraseSec(kind) + (CUE.PHRASE_REPEAT - 1) * CUE.PHRASE_GAP_SEC;
+  },
+  // 全体 = かたまり2回（間 0.55秒）。必ずこの長さで自分から止まる
+  cueSec(kind) {
+    return CUE.BURST_REPEAT * Core.burstSec(kind) + (CUE.BURST_REPEAT - 1) * CUE.BURST_GAP_SEC;
+  },
+  // 1音ずつの発音予定（開始秒・周波数・音量倍率）。本番も試聴もこの並びをそのまま鳴らす
+  cueSchedule(kind) {
+    const phrase = Core.phraseOf(kind);
+    if (!phrase) return [];
+    const out = [];
+    let t = 0;
+    for (let b = 0; b < CUE.BURST_REPEAT; b++) {
+      const gain = CUE.BURST_GAINS[b] === undefined ? 1 : CUE.BURST_GAINS[b];
+      for (let r = 0; r < CUE.PHRASE_REPEAT; r++) {
+        for (let i = 0; i < phrase.length; i++) {
+          out.push({ at: t, freq: phrase[i], dur: CUE.NOTE_SEC, gain: gain });
+          t += CUE.NOTE_SEC + (i < phrase.length - 1 ? CUE.NOTE_GAP_SEC : 0);
+        }
+        if (r < CUE.PHRASE_REPEAT - 1) t += CUE.PHRASE_GAP_SEC;
+      }
+      if (b < CUE.BURST_REPEAT - 1) t += CUE.BURST_GAP_SEC;
+    }
+    return out;
+  },
+
+  // TMR-008 過去に使ったラベルを新しい順に候補化
+  labelSuggestions(sessions) {
+    const seen = [];
+    for (let i = sessions.length - 1; i >= 0; i--) {
+      const l = sessions[i] && sessions[i].label;
+      if (l && seen.indexOf(l) === -1) seen.push(l);
+    }
+    return seen;
+  },
+
+  // TMR-012 音量 0-100 を gain(0-1) に変換
+  gainFor(volume) { return Math.max(0, Math.min(100, Number(volume) || 0)) / 100; },
+
+  /* ---------- TMR-030 超過計測と見積り較正 ---------- */
+
+  // 0 に達しても止めず、超過を秒で返す（残りが正なら 0）
+  overtimeSec(endAt, now) { return Math.max(0, Math.floor((now - endAt) / 1000)); },
+  // TMR-042【1】 「超過15分で鳴らす音」は廃止した。超過は画面表示だけで知らせる。
+
+  median(nums) {
+    const a = (nums || []).filter(n => typeof n === "number" && !isNaN(n)).slice().sort((x, y) => x - y);
+    if (!a.length) return null;
+    const m = Math.floor(a.length / 2);
+    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+  },
+
+  // 同じラベルの実績（分）。直近5回の中央値と前回値を返す
+  labelStats(sessions, label) {
+    const done = (sessions || []).filter(s => s && s.label === label && !s.skipped && !s.noShow && s.actualSec > 0);
+    if (!done.length) return { count: 0, lastMin: null, medianMin: null };
+    const recent = done.slice(-5).map(s => Math.round(s.actualSec / 60));
+    return {
+      count: done.length,
+      lastMin: Math.round(done[done.length - 1].actualSec / 60),
+      medianMin: Math.round(Core.median(recent))
+    };
+  },
+
+  /* ---------- TMR-031 引き継ぎメモ ---------- */
+  lastHandoff(sessions, label) {
+    for (let i = (sessions || []).length - 1; i >= 0; i--) {
+      const s = sessions[i];
+      if (s && s.label === label && s.handoff) return s.handoff;
+    }
+    return null;
+  },
+  handoffSkipCount(sessions) {
+    return (sessions || []).filter(s => s && !s.skipped && !s.noShow && s.handoffPrompted && !s.handoff).length;
+  },
+
+  /* ---------- TMR-032 割り込み箱 ---------- */
+  makeInboxItem(text, now) { return { id: Core.newId(now), text: text, createdAt: now }; },
+
+  /* ---------- TMR-034 ルーティン空振り検知 ---------- */
+  // 発火から5分以内に [了解] が押されなければ空振り
+  isNoShow(session, now) {
+    if (!session) return false;
+    if (session.skipped) return true;              // 「今日はやらない」も空振りに含める
+    if (session.acked) return false;
+    return (now - session.startedAt) >= 5 * 60000;
+  },
+  noShowCount(sessions, routineId) {
+    return (sessions || []).filter(s => s && s.routineId === routineId && s.noShow).length;
+  },
+  // 直近 n 回のうち空振りが過半数のルーティンを返す
+  noShowReview(sessions, routines, n) {
+    const limit = n || 4;
+    const out = [];
+    for (const r of routines || []) {
+      const fires = (sessions || []).filter(s => s && s.routineId === r.id).slice(-limit);
+      if (fires.length < limit) continue;
+      const bad = fires.filter(s => s.noShow);
+      if (bad.length * 2 > fires.length) {
+        out.push({ routine: r, total: fires.length, noShow: bad.length,
+                   reasons: bad.map(s => s.skipReason).filter(Boolean) });
+      }
+    }
+    return out;
+  },
+  // 日曜の初回のみ提示する（週キーで1度だけ）
+  weekKey(parts) { return parts.y + "-w" + Math.floor(Clock.atLocal(parts.y, parts.mo, parts.d, 0, 0) / (7 * 24 * 3600 * 1000)); },
+  shouldShowReview(parts, lastShownWeekKey) {
+    return parts.day === 0 && Core.weekKey(parts) !== lastShownWeekKey;
+  },
+
+  // 完了セッションの 曜日 × 時間帯 ヒートマップ（counts[day][hour]）
+  heatmap(sessions, partsOf) {
+    const grid = Array.from({ length: 7 }, () => new Array(24).fill(0));
+    for (const s of sessions || []) {
+      if (!s || s.skipped || s.noShow || !s.startedAt) continue;
+      const p = partsOf(s.startedAt);
+      grid[p.day][p.h]++;
+    }
+    return grid;
+  },
+
+  /* ---------- TMR-039 表示倍率 ---------- */
+  SCALE_MIN: 0.8, SCALE_MAX: 1.6, SCALE_STEP: 0.05,
+  // 範囲外・未設定・壊れた値を既定 1.0 に寄せ、刻み 0.05 に丸める
+  clampScale(v) {
+    const n = Number(v);
+    if (!isFinite(n) || n <= 0) return 1.0;
+    const clamped = Math.min(Core.SCALE_MAX, Math.max(Core.SCALE_MIN, n));
+    return Math.round(clamped / Core.SCALE_STEP) * Core.SCALE_STEP;
+  },
+
+  /* ---------- TMR-004 / TMR-040 作業中に鳴る音ではない、単発の確認音だけ残す ---------- */
+  CHECK_SEC: 0.3,   // 「音を有効にする」の動作確認音と、音量スライダーを離したときの確認音
+
+  // TMR-005 保存の退避: 書き込みが失敗しても例外で落とさず、成否だけを返す
+  safeWrite(writer, key, value) {
+    try { writer(key, value); return true; } catch (e) { return false; }
+  },
+  safeRead(reader, key, fallback) {
+    try { const v = reader(key); return v === null || v === undefined ? fallback : v; }
+    catch (e) { return fallback; }
+  },
+
+  // TMR-016 単発予約の生成（at は ms。文字列は Clock.parse で解釈してから渡す）
+  // TMR-041 sets を持つ（既定1）
+  makeReservation(at, durationMin, label, breakMin, sets) {
+    return { id: Core.newId(at), at: at, durationMin: durationMin, label: label || "",
+             breakMin: breakMin || 0, sets: Core.clampSets(sets === undefined ? 1 : sets),
+             fired: false, enabled: true };
+  },
+  newId(seed) { return "r" + Math.floor(seed).toString(36) + Math.floor(Math.random() * 1e6).toString(36); },
+
+  // TMR-017 発火判定: 未発火・有効・予定時刻 ≦ 現在時刻
+  dueReservations(list, now) {
+    return (list || []).filter(r => r && r.enabled !== false && !r.fired && r.at <= now);
+  },
+  // TMR-017 発火済みフラグを立ててから処理する（二重発火の防止）
+  markFired(res) { res.fired = true; return res; },
+
+  // TMR-024 起動時リカバリ: 猶予（分）以内に発火すべきだった未発火の予約
+  recoverableReservations(list, now, windowMin) {
+    const w = (Number(windowMin) || 0) * 60000;
+    return (list || []).filter(r => r && r.enabled !== false && !r.fired && r.at <= now && (now - r.at) <= w);
+  },
+
+  // TMR-018 予約から走り出すタイマーの初期状態（開始ボタンを待たない）
+  timerFromReservation(res, now) {
+    return { label: res.label || "", plannedMs: res.durationMin * 60000,
+             endAt: now + res.durationMin * 60000, startedAt: now,
+             breakMin: res.breakMin || 0, source: res.source || "reservation",
+             setTotal: Core.clampSets(res.sets === undefined ? 1 : res.sets), setIndex: 1 };  // TMR-041
+  },
+
+  /* ---------- TMR-025〜029 曜日ルーティン ---------- */
+
+  // 1件 = { id, days:[0-6], time:"09:00", durationMin, label, breakMin, enabled, pausedUntil }
+  // TMR-041 sets を持つ（既定1）
+  makeRoutine(days, time, durationMin, label, breakMin, sets) {
+    return { id: Core.newId(Core.minutesOf(time) * 1000 + 1), days: days.slice(), time: time, durationMin: durationMin,
+             label: label || "", breakMin: breakMin || 0, sets: Core.clampSets(sets === undefined ? 1 : sets),
+             enabled: true, pausedUntil: null, lastFiredKey: null };
+  },
+  minutesOf(time) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(time));
+    return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
+  },
+  dayKey(parts) { return parts.y + "-" + (parts.mo + 1) + "-" + parts.d; },
+
+  // TMR-029 一時停止の自動復帰: pausedUntil を過ぎたら有効に戻す
+  isRoutinePaused(routine, now) {
+    if (!routine.pausedUntil) return false;
+    if (now >= routine.pausedUntil) { routine.pausedUntil = null; return false; }
+    return true;
+  },
+
+  // TMR-025 曜日一致＋時刻到来の判定（parts は Clock.partsOf(now) の結果）
+  isRoutineDue(routine, now, parts, graceMs) {
+    const grace = graceMs === undefined ? 60000 : graceMs;
+    if (!routine || routine.enabled === false) return false;
+    if (Core.isRoutinePaused(routine, now)) return false;
+    if (!routine.days || routine.days.indexOf(parts.day) === -1) return false;
+    const nowMin = parts.h * 60 + parts.mi;
+    const startMin = Core.minutesOf(routine.time);
+    const diffMs = (nowMin - startMin) * 60000 + parts.s * 1000;
+    if (diffMs < 0 || diffMs > grace) return false;
+    return routine.lastFiredKey !== Core.dayKey(parts);   // 同じ日に二重発火しない
+  },
+  markRoutineFired(routine, parts) { routine.lastFiredKey = Core.dayKey(parts); return routine; },
+
+  // TMR-028 重複の検知（同じ曜日で時間帯が重なるか）
+  // TMR-041 占める時間は「合計時間」で見る（セット数ぶん後ろまで塞がるため）
+  overlappingRoutines(list, candidate) {
+    const aS = Core.minutesOf(candidate.time);
+    const aE = aS + Core.totalMinutes(candidate.durationMin, candidate.breakMin, candidate.sets);
+    return (list || []).filter(r => {
+      if (!r || r === candidate || r.enabled === false) return false;
+      if (!r.days.some(d => candidate.days.indexOf(d) !== -1)) return false;
+      const bS = Core.minutesOf(r.time), bE = bS + Core.totalMinutes(r.durationMin, r.breakMin, r.sets);
+      return aS < bE && bS < aE;
+    });
+  }
+  // TMR-020 の段階的アラーム（alarmScale / shouldAlarmBeep）は TMR-042【2】により廃止した。
+  // 音は playCue で決められた回数だけ鳴り、必ず自分から止まる。
+};
+
+/* ===================== CORE-END ===================== */
+
+// TMR-005 ストレージ抽象化（save/load を1箇所に集約、失敗時はメモリ保持へフォールバック）
+const Store = {
+  KEY: "koko.v1",
+  ok: true,
+  _mem: null,
+  defaults() {
+    return {
+      version: 2,   // TMR-041【6】 1 → 2（sets / groupId / setIndex / setTotal を導入）
+      settings: { volume: 70, tone: "sine", autoFullscreen: true, recoveryWindowMin: 15, defaultBreakMin: 10,
+                  uiScale: 1.0 },   // TMR-039
+      reservations: [], routines: [], sessions: [], inbox: []
+    };
+  },
+  // 読み書きの両方を実際に試して可否を判定する（file:// では getItem が SecurityError を投げる）
+  probe() {
+    const k = this.KEY + ".probe";
+    const wrote = Core.safeWrite((kk, v) => localStorage.setItem(kk, v), k, "1");
+    const read = Core.safeRead(kk => localStorage.getItem(kk), k, null);
+    Core.safeWrite(kk => localStorage.removeItem(kk), k);
+    return wrote && read === "1";
+  },
+  load() {
+    if (!this.probe()) { this.ok = false; return this._mem || this.defaults(); }
+    const raw = Core.safeRead(k => localStorage.getItem(k), this.KEY, null);
+    if (raw === null) { this.ok = true; return this._mem || this.defaults(); }
+    try { this.ok = true; return this.migrate(JSON.parse(raw)); }
+    catch (e) { this.ok = false; return this._mem || this.defaults(); }
+  },
+  save(data) {
+    this._mem = data;
+    this.ok = Core.safeWrite((k, v) => localStorage.setItem(k, v), this.KEY, JSON.stringify(data));
+    return this.ok;
+  },
+  // TMR-041【6】 読み込み時の移行。失敗しても既存データを壊さず、既定値で埋めて続行する。
+  // 何かを補ったときは warn に文言を入れ、画面に警告を出す。
+  warn: "",
+  migrate(d) {
+    const base = this.defaults();
+    if (!d || typeof d !== "object") { this.warn = "保存データを読めなかったため、既定値で始めます"; return base; }
+    for (const k of Object.keys(base)) if (d[k] === undefined) d[k] = base[k];
+    for (const k of ["reservations", "routines", "sessions", "inbox"]) if (!Array.isArray(d[k])) d[k] = [];
+    d.settings = Object.assign(base.settings, d.settings || {});
+    try {
+      const r = Core.migrateToV2(d);
+      this.warn = r.failed ? "保存データの一部を読めなかったため、既定値で補いました"
+                : (r.migrated && d.sessions.length + d.reservations.length + d.routines.length
+                   ? "古い保存データを読み込み、セット数を1として補いました" : "");
+    } catch (e) {
+      // 移行で落ちても既存データは返す（壊さない）
+      d.version = 2;
+      this.warn = "保存データの移行に失敗したため、足りない項目を既定値で補いました";
+    }
+    return d;
+  }
+};
+
+// TMR-038 敵対的レビュー: 実装後、別のサブエージェントに index.html と work-timer-SPEC.md を
+// 突き合わせさせ、TMR-001〜038 の未実装・部分実装と Non-Goals の混入だけを報告させる。
+// 実施記録と指摘対応の内容は PROGRESS.md に残す。
+/* ===================== SELFTEST-START ===================== */
+// TMR-037 セルフテストモード（ブラウザ: index.html?selftest=1 / Node: Core と Clock を抜き出して実行）
+function runSelfTest(log) {
+  const out = log || (m => console.log(m));
+  let pass = 0, fail = 0;
+  const t = (name, fn) => {
+    try { fn(); out("PASS  " + name); pass++; }
+    catch (e) { out("FAIL  " + name + "  -- " + (e && e.message ? e.message : e)); fail++; }
+  };
+  const eq = (a, b, m) => { if (a !== b) throw new Error((m || "") + " expected " + JSON.stringify(b) + " got " + JSON.stringify(a)); };
+  const ok = (v, m) => { if (!v) throw new Error(m || "expected truthy"); };
+  const ng = (v, m) => { if (v) throw new Error(m || "expected falsy"); };
+
+  t("TMR-001 表示整形", () => {
+    eq(Core.formatDuration(0), "00:00");
+    eq(Core.formatDuration(25 * 60000), "25:00");
+    eq(Core.formatDuration(90 * 60000), "1:30:00");
+    eq(Core.formatDuration(3661000), "1:01:01");
+  });
+
+  t("TMR-002 壁時計計時", () => {
+    Clock._reset();
+    const endAt = Clock.now() + 60000;
+    Clock._travel(10000);
+    const r = Core.remainingMs(endAt, Clock.now());
+    ok(Math.abs(r - 50000) <= 1000, "remaining=" + r);
+    Clock._reset();
+  });
+
+  t("TMR-015 残り1分は文字だけ", () => {
+    ok(Core.isLastMinute(59000));
+    ng(Core.isLastMinute(61000));
+    ng(Core.isLastMinute(-100), "0以下では出さない");
+    // TMR-042【1】 予告音そのものを廃止した（音の種別に warn は存在しない）
+    eq(Core.phraseOf("warn"), null);
+  });
+
+  t("TMR-008 ラベル候補", () => {
+    const s = [{ label: "事務" }, { label: "教材づくり" }, { label: "事務" }, { label: "" }];
+    const r = Core.labelSuggestions(s);
+    eq(r.join(","), "事務,教材づくり");
+  });
+
+  t("TMR-012 音量変換", () => {
+    eq(Core.gainFor(0), 0); eq(Core.gainFor(100), 1); eq(Core.gainFor(70), 0.7);
+    eq(Core.gainFor(999), 1); eq(Core.gainFor(-5), 0);
+  });
+
+  t("TMR-005 保存の退避", () => {
+    const boom = () => { throw new Error("SecurityError"); };
+    eq(Core.safeWrite(boom, "k", "v"), false);
+    eq(Core.safeRead(boom, "k", "fallback"), "fallback");
+    const mem = {};
+    eq(Core.safeWrite((k, v) => { mem[k] = v; }, "k", "v"), true);
+    eq(Core.safeRead(k => mem[k], "k", null), "v");
+  });
+
+  t("TMR-017 予約発火", () => {
+    Clock._reset();
+    const list = [Core.makeReservation(Clock.now() + 60000, 45, "資料づくり", 10)];
+    eq(Core.dueReservations(list, Clock.now()).length, 0, "まだ発火しない");
+    Clock._travel(61000);
+    eq(Core.dueReservations(list, Clock.now()).length, 1, "61秒後に発火");
+    Clock._reset();
+  });
+
+  t("TMR-017 二重発火なし", () => {
+    Clock._reset();
+    const list = [Core.makeReservation(Clock.now() + 60000, 45, "資料づくり", 0)];
+    Clock._travel(61000);
+    Core.dueReservations(list, Clock.now()).forEach(Core.markFired);
+    Clock._travel(60000);
+    eq(Core.dueReservations(list, Clock.now()).length, 0, "2回目は発火しない");
+    Clock._reset();
+  });
+
+  t("TMR-018 自動スタート", () => {
+    Clock._reset();
+    const res = Core.makeReservation(Clock.now(), 45, "資料づくり", 0);
+    const timer = Core.timerFromReservation(res, Clock.now());
+    const before = Core.remainingMs(timer.endAt, Clock.now());
+    Clock._travel(10000);
+    const after = Core.remainingMs(timer.endAt, Clock.now());
+    ok(after < before, "ボタン操作なしで減っている");
+    ok(Math.abs((before - after) - 10000) <= 1000);
+    Clock._reset();
+  });
+
+  t("TMR-020 鳴りっぱなしにしない", () => {
+    // TMR-042【2】 旧・強制アラーム（段階的な音量上昇と90秒の鳴り続け）は廃止した
+    eq(Core.alarmScale, undefined, "alarmScale は残っていない");
+    eq(Core.shouldAlarmBeep, undefined, "shouldAlarmBeep は残っていない");
+    Core.cueKinds().forEach(k => ok(Core.cueSec(k) < 3.2, k + " は3秒あまりで必ず終わる"));
+  });
+
+  t("TMR-025 曜日一致", () => {
+    Clock._reset();
+    const r = Core.makeRoutine([2], "09:00", 90, "教材づくり", 10);   // 火曜
+    const tue = Clock.atLocal(2026, 8, 15, 9, 0);                     // 2026-09-15 は火曜
+    const wed = Clock.atLocal(2026, 8, 16, 9, 0);                     // 水曜
+    eq(Clock.partsOf(tue).day, 2); eq(Clock.partsOf(wed).day, 3);
+    ok(Core.isRoutineDue(r, tue, Clock.partsOf(tue)), "火曜は発火する");
+    ng(Core.isRoutineDue(r, wed, Clock.partsOf(wed)), "水曜は発火しない");
+  });
+
+  t("TMR-025 ルーティン二重発火なし", () => {
+    const r = Core.makeRoutine([2], "09:00", 90, "教材づくり", 0);
+    const tue = Clock.atLocal(2026, 8, 15, 9, 0);
+    ok(Core.isRoutineDue(r, tue, Clock.partsOf(tue)));
+    Core.markRoutineFired(r, Clock.partsOf(tue));
+    const later = Clock.atLocal(2026, 8, 15, 9, 0) + 30000;
+    ng(Core.isRoutineDue(r, later, Clock.partsOf(later)), "同じ日の2回目は発火しない");
+    const nextTue = Clock.atLocal(2026, 8, 22, 9, 0);
+    ok(Core.isRoutineDue(r, nextTue, Clock.partsOf(nextTue)), "翌週は発火する");
+  });
+
+  t("TMR-029 一時停止の自動復帰", () => {
+    const r = Core.makeRoutine([2], "09:00", 90, "教材づくり", 0);
+    const tue = Clock.atLocal(2026, 8, 15, 9, 0);
+    r.pausedUntil = tue + 60000;
+    ok(Core.isRoutinePaused(r, tue), "停止中");
+    ng(Core.isRoutineDue(r, tue, Clock.partsOf(tue)), "停止中は発火しない");
+    const after = tue + 120000;
+    ng(Core.isRoutinePaused(r, after), "pausedUntil を過ぎたら有効に戻る");
+    eq(r.pausedUntil, null);
+  });
+
+  t("TMR-028 重複の検知", () => {
+    const a = Core.makeRoutine([2], "09:00", 90, "教材づくり", 0);
+    const b = Core.makeRoutine([2], "10:00", 30, "事務", 0);
+    const c = Core.makeRoutine([3], "09:30", 30, "別曜日", 0);
+    eq(Core.overlappingRoutines([a, c], b).length, 1, "火曜9:00-10:30 と重なる");
+    eq(Core.overlappingRoutines([a], c).length, 0, "曜日が違えば重ならない");
+    const d = Core.makeRoutine([2], "10:30", 30, "直後", 0);
+    eq(Core.overlappingRoutines([a], d).length, 0, "終了時刻と同時開始は重複ではない");
+  });
+
+  t("TMR-024 起動時リカバリ", () => {
+    Clock._reset();
+    const now = Clock.now();
+    const list = [Core.makeReservation(now - 10 * 60000, 90, "教材づくり", 0)];
+    eq(Core.recoverableReservations(list, now, 15).length, 1);
+  });
+
+  t("TMR-024 猶予外は無視", () => {
+    Clock._reset();
+    const now = Clock.now();
+    const list = [Core.makeReservation(now - 20 * 60000, 90, "教材づくり", 0)];
+    eq(Core.recoverableReservations(list, now, 15).length, 0);
+  });
+
+  t("TMR-030 超過計測", () => {
+    Clock._reset();
+    const endAt = Clock.now();
+    eq(Core.overtimeSec(endAt, Clock.now()), 0);
+    Clock._travel(42000);
+    eq(Core.overtimeSec(endAt, Clock.now()), 42, "0到達後も増える");
+    Clock._travel(60000);
+    eq(Core.overtimeSec(endAt, Clock.now()), 102);
+    eq(Core.crossedOvertimeMark, undefined, "TMR-042【1】 超過15分の音は廃止した");
+    Clock._reset();
+  });
+
+  t("TMR-030 中央値", () => {
+    eq(Core.median([61, 45, 58, 52, 70]), 58);
+    eq(Core.median([1, 2, 3, 4]), 2.5);
+    eq(Core.median([]), null);
+    const sessions = [45, 61, 58, 52, 70].map(m => ({ label: "教材づくり", actualSec: m * 60 }));
+    const st = Core.labelStats(sessions, "教材づくり");
+    eq(st.count, 5); eq(st.lastMin, 70); eq(st.medianMin, 58);
+  });
+
+  t("TMR-031 メモの引き継ぎ", () => {
+    const sessions = [
+      { label: "教材づくり", handoff: "3枚目" },
+      { label: "事務", handoff: "請求書" },
+      { label: "教材づくり", handoff: "5枚目の図から" }
+    ];
+    eq(Core.lastHandoff(sessions, "教材づくり"), "5枚目の図から");
+    eq(Core.lastHandoff(sessions, "未経験"), null);
+    eq(Core.handoffSkipCount([{ handoffPrompted: true, handoff: "" }, { handoffPrompted: true, handoff: "x" }]), 1);
+  });
+
+  t("TMR-032 割り込み箱", () => {
+    Clock._reset();
+    const item = Core.makeInboxItem("請求書の件", Clock.now());
+    eq(item.text, "請求書の件");
+    ok(item.id && item.createdAt);
+  });
+
+  t("TMR-034 空振り判定", () => {
+    Clock._reset();
+    const s = { startedAt: Clock.now(), acked: false, skipped: false };
+    ng(Core.isNoShow(s, Clock.now()), "発火直後は空振りではない");
+    Clock._travel(4 * 60000);
+    ng(Core.isNoShow(s, Clock.now()), "4分では空振りではない");
+    Clock._travel(2 * 60000);
+    ok(Core.isNoShow(s, Clock.now()), "6分で空振り");
+    ok(Core.isNoShow({ startedAt: Clock.now(), acked: true, skipped: true }, Clock.now()), "今日はやらないも空振り");
+    ng(Core.isNoShow({ startedAt: Clock.now() - 999999, acked: true, skipped: false }, Clock.now()), "了解済みは空振りでない");
+    Clock._reset();
+  });
+
+  t("TMR-034 見直しの提示", () => {
+    const r = Core.makeRoutine([2], "09:00", 90, "教材づくり", 0);
+    const sessions = [
+      { routineId: r.id, noShow: true, skipReason: "来客" },
+      { routineId: r.id, noShow: true, skipReason: "来客" },
+      { routineId: r.id, noShow: false },
+      { routineId: r.id, noShow: true, skipReason: "外出" }
+    ];
+    const rev = Core.noShowReview(sessions, [r], 4);
+    eq(rev.length, 1); eq(rev[0].noShow, 3); eq(rev[0].reasons.join(","), "来客,来客,外出");
+    eq(Core.noShowReview(sessions.slice(0, 2), [r], 4).length, 0, "4回たまるまで出さない");
+    const sun = Clock.partsOf(Clock.atLocal(2026, 8, 13, 10, 0));   // 2026-09-13 は日曜
+    eq(sun.day, 0);
+    ok(Core.shouldShowReview(sun, null), "日曜の初回は提示する");
+    ng(Core.shouldShowReview(sun, Core.weekKey(sun)), "同じ週に2度は出さない");
+    const mon = Clock.partsOf(Clock.atLocal(2026, 8, 14, 10, 0));
+    ng(Core.shouldShowReview(mon, null), "日曜以外は提示しない");
+  });
+
+  t("TMR-034 ヒートマップ", () => {
+    const at = Clock.atLocal(2026, 8, 15, 9, 30);   // 火曜9時台
+    const grid = Core.heatmap([{ startedAt: at, actualSec: 100 }, { startedAt: at, noShow: true }], Clock.partsOf);
+    eq(grid[2][9], 1, "完了分だけ数える");
+  });
+
+  t("TMR-039 表示倍率の丸めと範囲", () => {
+    eq(Core.clampScale(1.0), 1.0);
+    eq(Core.clampScale(undefined), 1.0, "未設定は既定1.0");
+    eq(Core.clampScale("1.35"), 1.35, "文字列も受ける");
+    eq(Core.clampScale(0.1), 0.8, "下限に丸める");
+    eq(Core.clampScale(9), 1.6, "上限に丸める");
+    ok(Math.abs(Core.clampScale(1.13) - 1.15) < 1e-9, "刻み0.05に丸める");
+    eq(Core.clampScale(NaN), 1.0);
+  });
+
+  t("TMR-041 合計時間", () => {
+    // 作業45 × 4 ＋ 休憩10 × 3 = 210分（最後のセットのあとに休憩は入れない）
+    eq(Core.totalMinutes(45, 10, 4), 210);
+    eq(Core.totalMinutes(45, 10, 1), 45, "1セットなら休憩は足さない");
+    eq(Core.totalMinutes(25, 5, 2), 55);
+    eq(Core.formatMinutesJa(210), "3時間30分");
+    eq(Core.formatMinutesJa(45), "45分");
+    eq(Core.formatMinutesJa(120), "2時間");
+    eq(Core.formatMinutesJa(0), "0分");
+  });
+
+  t("TMR-041 予定終了時刻", () => {
+    const at9 = Clock.atLocal(2026, 8, 15, 9, 0);
+    eq(Core.formatClock(Core.plannedEndAt(at9, 45, 10, 4), Clock.partsOf), "12:30");
+    eq(Core.planSummary(45, 10, 4, at9, Clock.partsOf), "合計 3時間30分 ／ 9:00 → 12:30");
+    eq(Core.planSummary(45, 10, 1, at9, Clock.partsOf), "合計 45分 ／ 9:00 → 9:45");
+    eq(Core.planSummary(45, 10, 4, null, null), "合計 3時間30分", "手動は合計だけ");
+  });
+
+  t("TMR-041 セット数の範囲", () => {
+    eq(Core.clampSets(undefined), 1, "未設定は1");
+    eq(Core.clampSets(0), 1); eq(Core.clampSets(-3), 1);
+    eq(Core.clampSets(99), 12, "上限12");
+    eq(Core.clampSets("4"), 4); eq(Core.clampSets(NaN), 1);
+    eq(Core.setLabel(2, 4), "2 / 4 セット");
+    eq(Core.setLabel(1, 1), "", "1セットのときは表示しない");
+  });
+
+  t("TMR-041 残りの予定終了時刻（超過でずれる）", () => {
+    const at9 = Clock.atLocal(2026, 8, 15, 9, 0);
+    // 1セット目の作業が 9:45 に終わる見込み・全4セット → 12:30
+    eq(Core.formatClock(Core.remainingEndAt(at9 + 45 * 60000, "running", 1, 4, 45, 10), Clock.partsOf), "12:30");
+    // 作業が10分超過して 9:55 に終わるなら、以降のセットも10分後ろにずれる
+    eq(Core.formatClock(Core.remainingEndAt(at9 + 55 * 60000, "running", 1, 4, 45, 10), Clock.partsOf), "12:40");
+    // 1回目の休憩が 9:55 に終わるなら、残りは作業3本＋休憩2本
+    eq(Core.formatClock(Core.remainingEndAt(at9 + 55 * 60000, "break", 1, 4, 45, 10), Clock.partsOf), "12:30");
+    // 最終セットの作業中なら、その作業が終わった時点で全部終わる
+    eq(Core.formatClock(Core.remainingEndAt(at9 + 45 * 60000, "running", 4, 4, 45, 10), Clock.partsOf), "9:45");
+  });
+
+  t("TMR-041 データ移行（v1 → v2）", () => {
+    // sets / groupId / setIndex / setTotal を持たない古いデータ
+    const old = { version: 1,
+      reservations: [{ id: "r1", at: 0, durationMin: 45, breakMin: 10 }],
+      routines: [{ id: "t1", days: [2], time: "09:00", durationMin: 90, breakMin: 10 }],
+      sessions: [{ id: "s1", label: "教材づくり", actualSec: 3600, startedAt: 0 }],
+      inbox: [] };
+    const r = Core.migrateToV2(old);
+    ok(r.migrated); ng(r.failed);
+    eq(old.version, 2);
+    eq(old.reservations[0].sets, 1); eq(old.routines[0].sets, 1);
+    eq(old.sessions[0].groupId, "s1", "groupId は自分の id");
+    eq(old.sessions[0].setIndex, 1); eq(old.sessions[0].setTotal, 1);
+    eq(old.sessions[0].label, "教材づくり", "既存の項目を壊さない");
+    // 壊れた値でも落ちず、既定に寄せる
+    const broken = { version: 1, reservations: [{ id: "x", sets: "ごみ" }], routines: null, sessions: [null], inbox: [] };
+    const r2 = Core.migrateToV2(broken);
+    ng(r2.failed, "例外で落ちない");
+    eq(broken.reservations[0].sets, 1);
+    ok(Core.migrateToV2(null).failed, "読めない場合は failed を返す");
+  });
+
+  t("TMR-042 音の構造（3連のかたまり × 2回）", () => {
+    // フレーズ3回 → 0.55秒あけて → もう3回。そこで止まる
+    const sched = Core.cueSchedule("start");
+    eq(sched.length, 3 * 3 * 2, "3音 × 3回 × 2かたまり");
+    eq(Core.cueSchedule("toBreak").length, 2 * 3 * 2, "2音のフレーズも同じ構造");
+    ok(Math.abs(Core.phraseSec("start") - 0.34) < 1e-9, "3音 = 0.10×3 + 0.02×2");
+    ok(Math.abs(Core.burstSec("start") - 1.14) < 1e-9, "かたまり = 約1.2秒");
+    ok(Math.abs(Core.cueSec("start") - 2.83) < 1e-9, "全体 = 約2.9秒");
+    ok(Core.cueSec("start") < 3.2 && Core.cueSec("start") > 2.5, "3回目のかたまりは鳴らない");
+    // かたまりの間は 0.55秒（1かたまり目の最後の音の終わりから、2かたまり目の頭まで）
+    const first = sched[8], second = sched[9];
+    ok(Math.abs((second.at - (first.at + CUE.NOTE_SEC)) - 0.55) < 1e-9, "かたまりの間は0.55秒");
+    // 音量は 1かたまり目 80% → 2かたまり目 100%
+    eq(sched[0].gain, 0.8); eq(sched[9].gain, 1.0);
+    eq(CUE.PHRASE_REPEAT, 3); eq(CUE.BURST_REPEAT, 2);
+  });
+
+  t("TMR-042 4種の音形を聞き分けられる", () => {
+    eq(Core.cueKinds().join(","), "start,toBreak,toWork,finish");
+    eq(Core.phraseOf("start").join(","), "440,554,659");
+    eq(Core.phraseOf("toBreak").join(","), "659,440");
+    eq(Core.phraseOf("toWork").join(","), "440,659");
+    eq(Core.phraseOf("finish").join(","), "659,554,440");
+    const dir = k => { const p = Core.phraseOf(k); return p[p.length - 1] > p[0] ? "up" : "down"; };
+    eq(dir("start"), "up"); eq(dir("toBreak"), "down");
+    eq(dir("toWork"), "up"); eq(dir("finish"), "down");
+    eq(Core.phraseOf("存在しない"), null);
+    // 4つとも同じ構造・同じ音量で鳴る
+    Core.cueKinds().forEach(k => {
+      eq(Core.cueSchedule(k).length, Core.phraseOf(k).length * 3 * 2, k);
+      eq(Core.cueSchedule(k)[0].gain, 0.8, k);
+    });
+  });
+
+  out("---- " + pass + " PASS / " + fail + " FAIL ----");
+  return { pass, fail };
+}
+/* ===================== SELFTEST-END ===================== */
+</script>
+
+<script>
+"use strict";
+/* ===================== UI 層（DOM に触れる処理はここだけ） ===================== */
+(function () {
+  const $ = id => document.getElementById(id);
+  let state = Store.load();
+
+  // TMR-005 保存できない環境では赤帯を常時表示
+  // TMR-041【6】 移行で既定値を補った場合も、同じ帯で警告する
+  function syncStorageWarn() {
+    const el = $("storageWarn");
+    if (!Store.ok) el.textContent = "この開き方では設定が保存されません（設定のJSON書き出しをお使いください）";
+    else if (Store.warn) el.textContent = Store.warn;
+    el.classList.toggle("on", !Store.ok || !!Store.warn);
+  }
+  function persist() { Store.save(state); syncStorageWarn(); }
+  syncStorageWarn();
+
+  /* ---------- TMR-012 / TMR-003 音（すべて WebAudio で合成、外部音源なし） ---------- */
+  const Sound = {
+    ctx: null, master: null, unlocked: false, silent: null,
+    unlock() {
+      if (this.unlocked) return;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) { this.unlocked = true; return; }
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = Core.gainFor(state.settings.volume);
+      this.master.connect(this.ctx.destination);
+      // TMR-003 無音オシレータ常駐（タブが「音を出している」扱いになり間引きが緩む）
+      const osc = this.ctx.createOscillator(), g = this.ctx.createGain();
+      g.gain.value = 0; osc.frequency.value = 440; osc.connect(g); g.connect(this.ctx.destination); osc.start();
+      this.silent = osc;
+      this.unlocked = true;
+      this.check();   // TMR-004 解錠時の動作確認音（作業中に鳴る音ではないので TMR-042 の4か所には数えない）
+    },
+    setVolume(v) { if (this.master) this.master.gain.value = Core.gainFor(v); },
+    // 鳴っている音を即座に全部止める（TMR-042【5】の「重ねて鳴らさない」を担保する）
+    stopAll() {
+      (this._active || []).forEach(n => { try { n.stop(); } catch (e) {} });
+      this._active = [];
+    },
+    // TMR-004 / TMR-040 単発の確認音（解錠時と、音量スライダーから指を離したとき）
+    check() { this.stopAll(); this.notes([{ at: 0, freq: 659, dur: Core.CHECK_SEC, gain: 1 }]); },
+    // TMR-012 音色3種。発音の予定表（Core.cueSchedule）をそのまま鳴らすだけの層
+    notes(schedule) {
+      if (!this.ctx) return;
+      if (this.ctx.state === "suspended") this.ctx.resume();
+      const tone = state.settings.tone;
+      const type = tone === "triangle" ? "triangle" : "sine";
+      const t0 = this.ctx.currentTime + 0.02;
+      for (const n of schedule) {
+        const freqs = tone === "chime" ? [n.freq, n.freq * 1.25, n.freq * 1.5] : [n.freq];
+        freqs.forEach(f => {
+          const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+          o.type = type; o.frequency.value = f;
+          const peak = Math.max(0.0002, 0.6 * n.gain / freqs.length);
+          const s = t0 + n.at, e = s + n.dur;
+          g.gain.setValueAtTime(0.0001, s);
+          g.gain.exponentialRampToValueAtTime(peak, s + Math.min(0.02, n.dur / 3));
+          g.gain.exponentialRampToValueAtTime(0.0001, e);
+          o.connect(g); g.connect(this.master);
+          o.start(s); o.stop(e + 0.02);
+          (this._active = this._active || []).push(o);
+          o.onended = () => { this._active = (this._active || []).filter(x => x !== o); };
+        });
+      }
+    }
+  };
+
+  // TMR-042【6】 音を鳴らす入口はこの関数ただ1つ。4か所（①作業の開始 ②作業→休憩
+  // ③休憩→作業 ④全セット終了）からこれを呼ぶ。鳴り方の中身は先頭の CUE 定数が決める。
+  // ここに工程の進行処理を書かないこと（進行は音と独立して時間どおりに動く）。
+  function playCue(kind) {
+    const schedule = Core.cueSchedule(kind);
+    if (!schedule.length || !Sound.unlocked) return;
+    Preview.stop();          // 試聴中でも本番の音と重ねない（前の音は必ず止める）
+    Sound.notes(schedule);   // 予定表どおり「3連のかたまり×2回」を鳴らし、約2.9秒で自ら止まる
+  }
+
+  // TMR-040 / TMR-042【5】 試聴（本番とまったく同じ鳴り方を、いまの音色・いまの音量で）
+  const Preview = {
+    kind: null, timer: null,
+    labels: { start: "▶ 開始", toBreak: "▶ 作業→休憩", toWork: "▶ 休憩→作業", finish: "▶ 終了" },
+    buttons() { return [...document.querySelectorAll(".prevBtn")]; },
+    syncLabels() {
+      this.buttons().forEach(b => { b.textContent = (this.kind === b.dataset.kind) ? "■ 停止" : this.labels[b.dataset.kind]; });
+    },
+    stop() {
+      if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+      Sound.stopAll();            // 前の音は必ず止めてから次に進む
+      this.kind = null;
+      this.syncLabels();
+    },
+    toggle(kind) { if (this.kind === kind) this.stop(); else this.play(kind); },
+    play(kind) {
+      this.stop();                // 重ねて鳴らさない（別のボタンを押した場合もここで前の音が止まる）
+      if (!Sound.unlocked) return;
+      if (!Core.phraseOf(kind)) return;
+      this.kind = kind;
+      this.syncLabels();
+      // 本番と同じ予定表をそのまま鳴らす（3連のかたまり×2回。約2.9秒で自ら止まる）
+      Sound.notes(Core.cueSchedule(kind));
+      this.timer = setTimeout(() => { this.kind = null; this.syncLabels(); }, Core.cueSec(kind) * 1000 + 120);
+    }
+  };
+  // 試聴ボタン（解錠前は押せない見た目にする）
+  Preview.buttons().forEach(b => { b.onclick = () => Preview.toggle(b.dataset.kind); });
+  function syncPreviewEnabled() {
+    Preview.buttons().forEach(b => { b.disabled = !Sound.unlocked; });
+    $("prevNote").innerHTML = Sound.unlocked ? "&nbsp;" : "先に「音を有効にする」を押してください";
+  }
+
+  /* ---------- 画面切り替え ---------- */
+  function show(id) {
+    document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === id));
+    document.querySelectorAll("footer nav button").forEach(b => b.classList.toggle("on", b.dataset.screen === id));
+    render();
+  }
+  document.querySelectorAll("footer nav button").forEach(b => b.onclick = () => show(b.dataset.screen));
+
+  /* ---------- TMR-001 / TMR-006 / TMR-009 タイマー ---------- */
+  const T = {
+    mode: "idle",        // idle | running | paused | break
+    label: "",
+    plannedMs: 25 * 60000,
+    endAt: 0,
+    pausedRemain: 0,
+    prevRemain: Infinity,
+    startedAt: 0,
+    source: "manual",
+    // TMR-041 セット（1セットのときも同じ道を通る）
+    workMin: 25, breakMin: 0, setIndex: 1, setTotal: 1, groupId: null, groupStartedAt: 0
+  };
+
+  function setDuration(min) {
+    if (T.mode === "running" || T.mode === "break") return;
+    T.plannedMs = min * 60000;
+    T.pausedRemain = T.plannedMs;
+    T.mode = "idle";
+    $("mWork").value = min;        // TMR-041 プリセットは「作業（分）」欄に入る
+    syncManualInputs();
+    render();
+  }
+
+  // 作業（または休憩）の1区間を走らせる。セットの進行そのものは
+  // startSets / advanceSets が受け持ち、ここは「いま何分走るか」だけを見る。
+  function start(opts) {
+    opts = opts || {};
+    T.label = opts.label !== undefined ? opts.label : $("labelInput").value.trim();
+    if (opts.durationMs) T.plannedMs = opts.durationMs;
+    T.source = opts.source || "manual";
+    T.mode = opts.mode === "break" ? "break" : "running";
+    T.endAt = Clock.now() + (opts.durationMs || T.plannedMs);
+    T.startedAt = Clock.now();
+    T.prevRemain = Infinity;
+    // TMR-011 「作業中は自動で全画面にする」設定は手動開始にも適用する
+    if (state.settings.autoFullscreen && T.mode === "running") tryEnterFullscreen();
+    render();
+  }
+
+  // TMR-041【3】 セットの入口。ここから先は「作業 → 休憩 → 作業 …」が
+  // ボタン操作なしで自動的に進む（TMR-042【2】）。
+  function startSets(plan) {
+    T.workMin = Math.max(1, Number(plan.durationMin) || 1);
+    T.setTotal = Core.clampSets(plan.sets);
+    // セット数が1なら休憩は発生しない
+    T.breakMin = T.setTotal > 1 ? Math.max(0, Number(plan.breakMin) || 0) : 0;
+    T.setIndex = 1;
+    T.groupId = Core.newGroupId(Clock.now());     // TMR-041【5】 同じ予約から生まれたセットに共通
+    T.groupStartedAt = Clock.now();
+    T.workLabel = plan.label || "";               // 休憩中に T.label が「休憩」になるため別に持つ
+    T.advanced = false;
+    start({ label: T.workLabel, durationMs: T.workMin * 60000, source: plan.source || "manual" });
+    playCue("start");                             // TMR-042 ① 作業の開始
+  }
+
+  // TMR-041【3】 1区間が終わったときの進み先。音とは独立に、時間どおりにここが呼ばれる。
+  function advanceAfterWork() {
+    recordSetSession();                            // TMR-041【5】 1セットにつき1件
+    if (T.setIndex >= T.setTotal) {
+      playCue("finish");                           // TMR-042 ④ 全セット終了
+      finishAll();
+      return;
+    }
+    if (T.breakMin <= 0) { advanceAfterBreak(); return; }   // 休憩0分なら次のセットの作業へ直行
+    playCue("toBreak");                            // TMR-042 ② 作業 → 休憩
+    startBreak(T.breakMin);
+  }
+  function advanceAfterBreak() {
+    T.setIndex++;
+    T.advanced = false;
+    $("breakOverlay").classList.remove("on");
+    playCue("toWork");                             // TMR-042 ③ 休憩 → 作業
+    start({ label: T.workLabel, durationMs: T.workMin * 60000, source: T.source });
+  }
+
+  function pause() {
+    if (T.mode !== "running") return;
+    T.pausedRemain = Core.remainingMs(T.endAt, Clock.now());
+    T.mode = "paused";
+    render();
+  }
+  function resume() {
+    if (T.mode !== "paused") return;
+    T.endAt = Clock.now() + T.pausedRemain;
+    T.mode = "running";
+    render();
+  }
+  function toggle() {
+    // TMR-030 超過中の主ボタンは「終了する」（0で止めないため、終了は明示操作）
+    if (T.mode === "running" && Core.remainingMs(T.endAt, Clock.now()) < 0) { endSession(); return; }
+    if (T.mode === "running") pause();
+    else if (T.mode === "paused") resume();
+    else if (T.mode === "idle") startWithHandoff();
+  }
+
+  // TMR-031 同じラベルなら、カウントダウン前に前回メモを3秒表示してから始める
+  // TMR-041 手動タイマーも 作業（分）／休憩（分）／セット数 のとおりに走る
+  function startWithHandoff() {
+    const label = $("labelInput").value.trim();
+    const plan = manualPlan();
+    showHandoff(label, () => startSets({ label: label, durationMin: plan.workMin,
+                                         breakMin: plan.breakMin, sets: plan.sets, source: "manual" }));
+  }
+  // TMR-041【1】 手動タイマーの入力値（範囲外は既定に丸める）
+  function manualPlan() {
+    return { workMin: Math.max(1, Math.min(600, Number($("mWork").value) || 1)),
+             breakMin: Math.max(0, Math.min(120, Number($("mBreak").value) || 0)),
+             sets: Core.clampSets($("mSets").value) };
+  }
+
+  // TMR-006 Esc でリセット（確認ダイアログなし、3秒以内なら取り消せる）
+  let undoReset = null;
+  function reset() {
+    if (T.mode === "idle") return;
+    undoReset = { mode: T.mode, endAt: T.endAt, pausedRemain: T.pausedRemain, label: T.label, plannedMs: T.plannedMs, until: Clock.now() + 3000 };
+    T.mode = "idle"; T.pausedRemain = T.plannedMs;
+    render();
+  }
+  function tryUndo() {
+    if (undoReset && Clock.now() <= undoReset.until) {
+      Object.assign(T, { mode: undoReset.mode, endAt: undoReset.endAt, pausedRemain: undoReset.pausedRemain, label: undoReset.label, plannedMs: undoReset.plannedMs });
+      undoReset = null; render(); return true;
+    }
+    return false;
+  }
+
+  function currentRemain() {
+    if (T.mode === "paused" || T.mode === "idle") return T.mode === "idle" ? T.plannedMs : T.pausedRemain;
+    return Core.remainingMs(T.endAt, Clock.now());
+  }
+
+  // TMR-041【3】 休憩あけの連結はセットの進行（advanceAfterBreak）が受け持つ。
+  // 旧 chainAfterBreak は廃止した。
+
+  // TMR-009 / TMR-023 / TMR-033 休憩は全画面オーバーレイで始まる
+  function startBreak(min) {
+    start({ mode: "break", durationMs: min * 60000, label: "休憩", source: T.source });
+    T.advanced = false;
+    $("breakOverlay").classList.add("on");
+  }
+
+  /* ---------- TMR-011 全画面 ---------- */
+  function toggleFullscreen() {
+    try {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+      else document.exitFullscreen().catch(() => {});
+    } catch (e) {}
+  }
+  function tryEnterFullscreen() {
+    try { if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {}); } catch (e) {}
+  }
+
+  /* ---------- TMR-014 ブラウザ通知（許可がなくても動作に影響させない） ---------- */
+  function notify(title, body) {
+    try {
+      if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+      new Notification(title, { body: body || "" });
+    } catch (e) {}
+  }
+
+  // 画面下の一時メッセージ（既定8秒。render() の上書きに負けないようにする）
+  let flashMsg = null;
+  function flash(text, sec) { flashMsg = { text: text, until: Clock.now() + (sec || 8) * 1000 }; render(); }
+
+  /* ---------- 描画 ---------- */
+  function render() {
+    const remain = currentRemain();
+    const over = remain < 0;
+    const t = $("timer");
+    t.textContent = Core.formatDuration(Math.abs(remain));
+    t.classList.toggle("over", over && T.mode !== "break");
+    t.classList.toggle("rest", T.mode === "break");
+    $("overRule").classList.toggle("on", over && T.mode !== "break");
+    $("label").textContent = T.label || " ";
+    $("btnStart").textContent = (T.mode === "running" && over) ? "終了する"
+      : (T.mode === "running" || T.mode === "break") ? "一時停止"
+      : (T.mode === "paused" ? "再開" : "開始");
+    let hint = " ";
+    // TMR-041【4】 いま何セット目か（1セットのときは出さない）＋ TMR-041【3】 予定終了時刻
+    renderSetNotes();
+    // TMR-015 残り1分は文字だけ（TMR-042【1】で予告音は廃止した）
+    if (T.mode === "running" && Core.isLastMinute(remain)) hint = "あと1分";
+    if (T.mode === "running" && over) hint = "超過中";
+    if (T.mode === "paused") hint = "一時停止中";
+    // 一時メッセージは毎秒の再描画で消さず、期限まで優先して表示する
+    if (flashMsg && Clock.now() < flashMsg.until) hint = flashMsg.text;
+    else if (flashMsg) flashMsg = null;
+    $("hint").textContent = hint;
+    // TMR-033 休憩中は全画面の休憩画面に残り時間を出す
+    if (T.mode === "break") $("breakTime").textContent = Core.formatDuration(Math.max(0, remain));
+    // TMR-030 見積り較正の表示
+    renderCalibration();
+    // TMR-010 タブタイトル
+    document.title = (T.mode === "idle" ? "KOKO" : (over ? "+" : "") + Core.formatDuration(Math.abs(remain)) + (T.label ? " · " + T.label : ""));
+    renderLabelList();
+  }
+
+  // TMR-041【4】 タイマー数字の上に「2 / 4 セット」を出す（セット数が1のときは出さない）。
+  // あわせて、超過・一時停止でずれた分を含めた予定終了時刻を毎秒計算し直して見せる（TMR-041【3】）。
+  function renderSetNotes() {
+    const active = (T.mode === "running" || T.mode === "break" || T.mode === "paused") && T.setTotal > 1;
+    let text = " ";
+    if (active) {
+      text = Core.setLabel(T.setIndex, T.setTotal);
+      if (T.mode !== "paused") {
+        const nextAt = Math.max(T.endAt, Clock.now());   // 超過中は「いま」を起点にする
+        text += "　" + Core.formatClock(T.groupStartedAt, Clock.partsOf) + " → " +
+          Core.formatClock(Core.remainingEndAt(nextAt, T.mode, T.setIndex, T.setTotal, T.workMin, T.breakMin), Clock.partsOf);
+      }
+    }
+    ["setNote", "breakSetNote", "fireSetNote"].forEach(id => { if ($(id).textContent !== text) $(id).textContent = text; });
+  }
+
+  // TMR-030 前回・直近5回の中央値と、その長さの提案ボタン
+  function renderCalibration() {
+    const label = $("labelInput").value.trim();
+    const box = $("calib");
+    if (!label) { if (box.innerHTML !== "&nbsp;") box.innerHTML = "&nbsp;"; return; }
+    const st = Core.labelStats(state.sessions, label);
+    if (!st.count) { box.innerHTML = "&nbsp;"; return; }
+    // 実績が5件たまるまで中央値と提案ボタンは出さない（§7-4 選定1）
+    const html = st.count < 5
+      ? "前回 " + st.lastMin + "分（あと" + (5 - st.count) + "回で中央値の提案が出ます）"
+      : "前回 " + st.lastMin + "分・直近5回の中央値 " + st.medianMin + "分 " +
+        "<button class=\"quiet\" data-min=\"" + st.medianMin + "\">[ " + st.medianMin + " ]</button>";
+    if (box.innerHTML !== html) box.innerHTML = html;
+  }
+  $("calib").onclick = e => {
+    const b = e.target.closest("button[data-min]");
+    if (b) setDuration(Number(b.dataset.min));
+  };
+  $("labelInput").addEventListener("input", renderCalibration);
+
+  function renderLabelList() {
+    const dl = $("labelList");
+    const opts = Core.labelSuggestions(state.sessions).map(l => "<option value=\"" + l.replace(/"/g, "&quot;") + "\">").join("");
+    if (dl.innerHTML !== opts) dl.innerHTML = opts;
+  }
+
+  /* ---------- 毎秒のループ（壁時計で毎回再計算する） ---------- */
+  function tick() {
+    if (!Sound.unlocked) return;          // TMR-004 解錠前は何も走らせない
+    checkDue();                            // TMR-017 予約の発火判定
+    checkRoutines();                       // TMR-025 ルーティンの発火判定
+    checkNoShow();                         // TMR-034 空振り判定
+    if (firedContext && $("fireOverlay").classList.contains("on")) {
+      $("fireTime").textContent = (currentRemain() < 0 ? "+" : "") + Core.formatDuration(Math.abs(currentRemain()));
+    }
+    if (T.mode === "running" || T.mode === "break") {
+      const remain = Core.remainingMs(T.endAt, Clock.now());
+      // TMR-041【3】 / TMR-042【2】 工程の切り替えは音とは独立に、時間どおりに進む。
+      // ボタン操作は一切必要としない（了解を押しても押さなくても同じ）。
+      if (T.prevRemain > 0 && remain <= 0 && !T.advanced) {
+        if (T.mode === "break") {
+          T.advanced = true;
+          notify("休憩おわり", T.workLabel || "");
+          advanceAfterBreak();                    // 休憩 → 次のセットの作業
+        } else if (T.setTotal > 1) {
+          // TMR-041【3】 複数セットのときは、最後のセットまで自動で進む。
+          // 途中のセットなら休憩へ、最後のセットならそこで全部終了する。
+          T.advanced = true;
+          notify("時間です", T.label || "");
+          advanceAfterWork();
+        } else {
+          // TMR-030 1セットのときは 0 で止めず、超過を計測し続ける（[ 終了する ]で終わる）
+          notify("時間です", T.label || "");
+        }
+      }
+      // 工程が切り替わった場合は、新しい工程の残り時間を見る（古い値で上書きしない）
+      T.prevRemain = (T.mode === "running" || T.mode === "break")
+        ? Core.remainingMs(T.endAt, Clock.now()) : remain;
+    }
+    render();
+  }
+  setInterval(tick, 1000);
+
+  /* ---------- 入力 ---------- */
+  /* ---------- TMR-041【1】【2】 入力欄の同期と合計時間の表示 ---------- */
+  // セット数が1のときは休憩欄を灰色にして無効化し、合計時間の1行を入力のたびに更新する。
+  // 計算はすべて Core（DOM に触れない純粋関数）が行う。
+  function syncSetRow(workId, breakId, setsId, outId, startMs) {
+    const sets = Core.clampSets($(setsId).value);
+    if (String(sets) !== $(setsId).value) $(setsId).value = sets;
+    $(breakId).disabled = sets <= 1;
+    const workMin = Math.max(0, Number($(workId).value) || 0);
+    const breakMin = sets <= 1 ? 0 : Math.max(0, Number($(breakId).value) || 0);
+    $(outId).textContent = Core.planSummary(workMin, breakMin, sets,
+      startMs === undefined ? null : startMs, startMs === undefined ? null : Clock.partsOf);
+  }
+  function syncManualInputs() { syncSetRow("mWork", "mBreak", "mSets", "mTotal"); }
+  function syncResInputs() {
+    const v = $("resAt").value;
+    syncSetRow("resMin", "resBreak", "resSets", "resTotal", v ? Clock.parse(v) : undefined);
+  }
+  function syncRtInputs() {
+    const mins = Core.minutesOf($("rtTime").value || "09:00");
+    const p = Clock.partsOf(Clock.now());
+    syncSetRow("rtMin", "rtBreak", "rtSets", "rtTotal",
+      Clock.atLocal(p.y, p.mo, p.d, Math.floor(mins / 60), mins % 60));
+  }
+  ["mWork", "mBreak", "mSets"].forEach(id => $(id).addEventListener("input", syncManualInputs));
+  ["resMin", "resBreak", "resSets", "resAt"].forEach(id => $(id).addEventListener("input", syncResInputs));
+  ["rtMin", "rtBreak", "rtSets", "rtTime"].forEach(id => $(id).addEventListener("input", syncRtInputs));
+
+  // TMR-007 プリセット
+  const PRESETS = [15, 25, 45, 60, 90];
+  $("presets").innerHTML = PRESETS.map(m => "<button data-min=\"" + m + "\">" + m + "</button>").join("");
+  $("presets").onclick = e => { const b = e.target.closest("button"); if (b) setDuration(Number(b.dataset.min)); };
+  $("btnStart").onclick = () => toggle();
+
+  let escDownAt = 0;
+  document.addEventListener("keydown", e => {
+    if (!Sound.unlocked) return;
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+    if (e.code === "Space" && !typing) { e.preventDefault(); toggle(); }
+    else if (e.key === "Escape") {
+      // 終了オーバーレイ（メモ入力中）が開いている間は、Esc で休憩を解除しない
+      if ($("endOverlay").classList.contains("on")) return;
+      if (!escDownAt) escDownAt = Clock.now();
+      // TMR-033 休憩オーバーレイは Esc の2秒長押しで解除できる（画面には表示しない隠し操作）
+      if (T.mode === "break" && Clock.now() - escDownAt >= 2000) { escDownAt = 0; leaveBreak(); return; }
+      if (T.mode !== "break") { if (!tryUndo()) reset(); }
+    }
+    else if ((e.key === "f" || e.key === "F") && !typing) toggleFullscreen();
+    // TMR-032 作業中に i で割り込みメモ（タイマーは止めない）
+    else if ((e.key === "i" || e.key === "I") && !typing && T.mode === "running") { e.preventDefault(); openInterrupt(); }
+  });
+  document.addEventListener("keyup", e => { if (e.key === "Escape") escDownAt = 0; });
+
+  // TMR-033 休憩を切り上げる（最下部の小さなリンク）
+  // TMR-041 残りのセットがあれば、そのまま次のセットの作業へ進む
+  function leaveBreak() {
+    if (T.mode !== "break") return;
+    if (T.setIndex < T.setTotal) { advanceAfterBreak(); return; }
+    playCue("finish");             // 残りが無ければここで全セット終了
+    finishAll();
+  }
+  $("btnBreakOut").onclick = leaveBreak;
+  // TMR-041【4】 [ ここで終える ]：残りのセットを実行せずに終了する
+  $("btnEndHere").onclick = () => endHere();
+
+  /* ---------- 設定画面 ---------- */
+  // TMR-039 表示倍率を画面全体へ反映する（週間ビュー・予約一覧も同じ変数を見ているので自動で追従する）
+  function applyScale() {
+    const v = Core.clampScale(state.settings.uiScale);
+    state.settings.uiScale = v;
+    document.documentElement.style.setProperty("--ui-scale", String(v));
+    $("scaleVal").textContent = v.toFixed(2);
+  }
+
+  function bindSettings() {
+    $("setScale").value = Core.clampScale(state.settings.uiScale);
+    applyScale();
+    $("setVolume").value = state.settings.volume;
+    $("volumeVal").textContent = state.settings.volume;
+    $("setTone").value = state.settings.tone;
+    $("setAutoFs").checked = !!state.settings.autoFullscreen;
+    $("setRecovery").value = state.settings.recoveryWindowMin;
+    $("setBreak").value = state.settings.defaultBreakMin;
+  }
+  bindSettings();
+  syncPreviewEnabled();   // TMR-040 解錠前は押せない見た目にする
+  // TMR-039 動かすと即座に反映し、settings.uiScale として保存する
+  $("setScale").oninput = e => { state.settings.uiScale = Number(e.target.value); applyScale(); persist(); };
+  // TMR-040 動かしている最中は鳴らさない。指を離した瞬間だけ 0.3 秒の確認音を鳴らす
+  $("setVolume").oninput = e => { state.settings.volume = Number(e.target.value); $("volumeVal").textContent = state.settings.volume; Sound.setVolume(state.settings.volume); persist(); };
+  $("setVolume").onchange = () => { if (Sound.unlocked) { Preview.stop(); Sound.check(); } };
+  // TMR-040 音色を切り替えた瞬間には鳴らさない（試聴ボタンを押したときだけ鳴らす）
+  $("setTone").onchange = e => { state.settings.tone = e.target.value; persist(); };
+  $("setAutoFs").onchange = e => { state.settings.autoFullscreen = e.target.checked; persist(); };
+  $("setRecovery").onchange = e => { state.settings.recoveryWindowMin = Number(e.target.value); persist(); };
+  $("setBreak").onchange = e => { state.settings.defaultBreakMin = Number(e.target.value); persist(); };
+
+  // TMR-013 設定のJSON入出力
+  $("btnExport").onclick = () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "koko-backup.json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  $("btnImport").onclick = () => $("importFile").click();
+  $("importFile").onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        state = Store.migrate(JSON.parse(r.result));
+        persist(); bindSettings();
+        renderPlans(); renderWeek(); render();   // TMR-013 予約・ルーティン・週間ビューも即座に復元表示する
+        flash("読み込みました", 8);
+      } catch (err) { flash("読み込めませんでした", 8); }
+    };
+    r.readAsText(f);
+    e.target.value = "";
+  };
+
+  /* ---------- TMR-004 サウンド解錠（押すまで他の操作をさせない） ---------- */
+  $("btnUnlock").onclick = () => {
+    Sound.unlock();
+    // TMR-014 通知許可はこの1クリックにまとめて要求する
+    try { if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission().catch(() => {}); } catch (e) {}
+    $("unlock").classList.remove("on");
+    syncPreviewEnabled();     // TMR-040 解錠後は試聴ボタンを押せるようにする
+    checkRecovery();        // TMR-024 解錠直後に取り逃した予約を提示
+    weeklyReview();           // TMR-034 日曜の初回起動時だけ見直しを提示
+    render();
+  };
+
+  /* ================= TMR-030〜034 選定5機能 ================= */
+
+  function recordSession(s) {
+    // TMR-041 どの経路で作られたセッションにも groupId / setIndex / setTotal を持たせる
+    const id = Core.newId(Clock.now());
+    const rec = Object.assign({ id: id, interruptions: [], handoff: "",
+                                groupId: id, setIndex: 1, setTotal: 1 }, s);
+    if (!rec.groupId) rec.groupId = id;
+    state.sessions.push(rec);
+    persist();
+    return rec;
+  }
+
+  // TMR-031 前回の引き継ぎメモ（起動画面・開始前表示の両方で使う）
+  function handoffTextFor(label) {
+    const h = label ? Core.lastHandoff(state.sessions, label) : null;
+    return h ? "前回の続き → 「" + h + "」" : " ";
+  }
+  // カウントダウンが始まる前に3秒だけ大きく出す
+  function showHandoff(label, then) {
+    const h = label ? Core.lastHandoff(state.sessions, label) : null;
+    if (!h) { then(); return; }
+    $("handoffText").textContent = "「" + h + "」";
+    $("handoffOverlay").classList.add("on");
+    setTimeout(() => { $("handoffOverlay").classList.remove("on"); then(); }, 3000);
+  }
+
+  // TMR-034 空振り判定（発火から5分 ack されなければ記録する）
+  function checkNoShow() {
+    if (!firedContext || firedContext.acked || firedContext.skipped || firedContext.recorded) return;
+    if (T.setIndex > 1) return;   // TMR-041【5】 2セット目以降では判定しない
+    if (Core.isNoShow({ startedAt: firedContext.firedAt, acked: false, skipped: false }, Clock.now())) {
+      firedContext.recorded = true;
+      recordSession({ label: firedContext.plan.label, plannedMin: firedContext.plan.durationMin,
+                      source: firedContext.plan.source, routineId: firedContext.plan.routineId || null,
+                      startedAt: firedContext.firedAt, endedAt: Clock.now(),
+                      actualSec: 0, overSec: 0, acked: false, skipped: false, noShow: true, skipReason: null,
+                      groupId: T.groupId, setIndex: 1, setTotal: T.setTotal });   // TMR-041 予約1件につき1回
+      renderPlans();
+    }
+  }
+
+  // TMR-034 週に1度（日曜の初回起動時）だけ見直しを提示する
+  let reviewTarget = null;
+  function weeklyReview() {
+    const parts = Clock.partsOf(Clock.now());
+    if (!Core.shouldShowReview(parts, state.settings.lastReviewWeek || null)) return;
+    const list = Core.noShowReview(state.sessions, state.routines, 4);
+    state.settings.lastReviewWeek = Core.weekKey(parts);
+    persist();
+    if (!list.length) return;
+    const r = list[0];
+    reviewTarget = r.routine;
+    $("reviewText").textContent = "《" + r.routine.days.map(d => DAY_NAMES[d]).join("") + " " + r.routine.time +
+      " " + (r.routine.label || "無題") + "》は直近" + r.total + "回中" + r.noShow + "回が空振りです。" +
+      (r.reasons.length ? "理由：" + r.reasons.join("、") : "");
+    $("reviewOverlay").classList.add("on");
+  }
+  $("btnRevKeep").onclick = () => { reviewTarget = null; $("reviewOverlay").classList.remove("on"); };
+  $("btnRevDel").onclick = () => {
+    if (reviewTarget) { state.routines = state.routines.filter(x => x.id !== reviewTarget.id); persist(); }
+    reviewTarget = null; $("reviewOverlay").classList.remove("on"); renderPlans(); renderWeek();
+  };
+  function jumpToEdit(focusId) {
+    const r = reviewTarget; reviewTarget = null; $("reviewOverlay").classList.remove("on");
+    if (!r) return;
+    $("rtTime").value = r.time; $("rtMin").value = r.durationMin; $("rtLabel").value = r.label; $("rtBreak").value = r.breakMin;
+    $("rtSets").value = Core.clampSets(r.sets === undefined ? 1 : r.sets); syncRtInputs();   // TMR-041
+    document.querySelectorAll(".rtDay").forEach(c => { c.checked = r.days.indexOf(Number(c.value)) !== -1; });
+    state.routines = state.routines.filter(x => x.id !== r.id);
+    persist(); renderPlans(); renderWeek();
+    show("plansScreen");
+    $("rtWarn").textContent = "編集中：内容を直して［登録］を押してください";
+    $(focusId).focus();
+  }
+  $("btnRevTime").onclick = () => jumpToEdit("rtTime");
+  $("btnRevDays").onclick = () => jumpToEdit("rtDays");
+
+  // TMR-034 曜日 × 時間帯ヒートマップ（完了セッションのみ）
+  function renderHeatmap() {
+    const grid = Core.heatmap(state.sessions, Clock.partsOf);
+    const order = [1, 2, 3, 4, 5, 6, 0];
+    let minH = 23, maxH = 0, any = false;
+    grid.forEach(row => row.forEach((v, h) => { if (v) { any = true; minH = Math.min(minH, h); maxH = Math.max(maxH, h); } }));
+    if (!any) { $("heatTable").innerHTML = "<div class=\"aux\">完了したセッションがまだありません</div>"; return; }
+    let html = "<table class=\"heat\"><tr><th>時刻</th>" + order.map(d => "<th>" + DAY_NAMES[d] + "</th>").join("") + "</tr>";
+    for (let h = minH; h <= maxH; h++) {
+      html += "<tr><td class=\"num\">" + String(h).padStart(2, "0") + ":00</td>";
+      for (const d of order) html += "<td class=\"num\">" + (grid[d][h] || "") + "</td>";
+      html += "</tr>";
+    }
+    $("heatTable").innerHTML = "<div class=\"tablewrap\">" + html + "</table></div>";
+  }
+
+  // TMR-032 割り込みキャプチャ（i キーでその場に1行、タイマーは止めない）
+  function openInterrupt() {
+    $("interruptBar").style.display = "block";
+    $("interruptInput").value = "";
+    $("interruptInput").focus();
+  }
+  $("interruptInput").addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      const v = $("interruptInput").value.trim();
+      if (v) { state.inbox.push(Core.makeInboxItem(v, Clock.now())); persist(); }
+      $("interruptBar").style.display = "none";
+    } else if (e.key === "Escape") { e.stopPropagation(); $("interruptBar").style.display = "none"; }
+  });
+
+  // セッション終了の後始末（TMR-030 記録 / TMR-031 メモ / TMR-032 3択）
+  let endedRecord = null;
+
+  // TMR-041【5】 セッションログは1セットにつき1件。同じ予約から生まれたセットは
+  // 共通の groupId を持ち、setIndex / setTotal で位置が分かる。
+  function recordSetSession() {
+    const now = Clock.now();
+    const overSec = Core.overtimeSec(T.endAt, now);
+    const actualSec = Math.max(0, Math.floor((now - T.startedAt) / 1000));
+    const isFirst = T.setIndex === 1;
+    endedRecord = recordSession({
+      label: T.workLabel !== undefined ? T.workLabel : T.label,
+      plannedMin: T.workMin,                       // 1セットあたりの見積り（合計ではない）
+      actualSec: actualSec, overSec: overSec,
+      startedAt: T.startedAt, endedAt: now, source: T.source,
+      routineId: (firedContext && firedContext.plan.routineId) || null,
+      groupId: T.groupId || Core.newGroupId(now), setIndex: T.setIndex, setTotal: T.setTotal,
+      interruptions: [],                           // 割り込みは最後にまとめて記録する
+      handoff: "", handoffPrompted: false,
+      // TMR-041【5】 空振り判定は1セット目だけ。2セット目以降は判定しない
+      acked: isFirst ? (firedContext ? firedContext.acked : true) : true,
+      skipped: false, noShow: false, skipReason: null
+    });
+    renderPlans();
+    return endedRecord;
+  }
+
+  // TMR-041【5】 引き継ぎメモ（TMR-031）と割り込みの3択（TMR-032）は、
+  // セットの切れ目では出さない。全セットが終わったとき、または
+  // [ ここで終える ] を押したときだけ、最後に1回だけ出す。
+  function finishAll() {
+    const group = state.sessions.filter(s => s.groupId && s.groupId === T.groupId);
+    const doneSets = group.length;
+    const plannedMin = T.workMin * doneSets;
+    const actualMin = Math.round(group.reduce((a, s) => a + (s.actualSec || 0), 0) / 60);
+    T.mode = "idle"; T.pausedRemain = T.workMin * 60000; T.advanced = true;
+    firedContext = null;
+    $("fireOverlay").classList.remove("on");
+    $("breakOverlay").classList.remove("on");
+    // 最後の1件に、今回の割り込みをまとめて記録する
+    if (endedRecord) { endedRecord.interruptions = state.inbox.map(i => i.text); endedRecord.handoffPrompted = true; }
+    // TMR-030 見積り vs 実績（TMR-041 複数セットのときは合計で見せる）
+    const diff = actualMin - plannedMin;
+    $("endSummary").textContent =
+      (T.setTotal > 1 ? doneSets + " / " + T.setTotal + " セット　" : "") +
+      "見積り " + plannedMin + "分 / 実績 " + actualMin + "分（" + (diff >= 0 ? "+" : "") + diff + "分）" +
+      (state.inbox.length ? "　今回の割り込み " + state.inbox.length + "件" : "");
+    // TMR-031 書かずに閉じた回数（今まさに入力中の1件は数に含めない）
+    const skipped = Core.handoffSkipCount(state.sessions.filter(s => !endedRecord || s.id !== endedRecord.id));
+    if (skipped) $("endSummary").textContent += "　／ メモを書かずに閉じた回数 " + skipped + "回";
+    $("handoffInput").value = "";
+    renderInbox();
+    $("endOverlay").classList.add("on");
+    $("handoffInput").focus();
+    persist();
+    render(); renderPlans();
+  }
+
+  // TMR-030 超過中の [ 終了する ]（最終セットの終わり方）
+  function endSession() {
+    if (T.mode !== "running") return;
+    recordSetSession();
+    playCue("finish");                             // TMR-042 ④ 全セット終了
+    finishAll();
+  }
+
+  // TMR-041【4】 休憩画面の [ ここで終える ]。残りのセットは実行しない。
+  // 直前の作業はすでに記録済みなので、ここでは終了の後始末だけを行う。
+  function endHere() {
+    if (T.mode !== "break") return;
+    playCue("finish");                             // TMR-042 ④ 全セット終了
+    finishAll();
+  }
+
+  function renderInbox() {
+    $("inboxList").innerHTML = state.inbox.length
+      ? "<div class=\"aux\">今回の割り込み</div>" + state.inbox.map(i =>
+          "<div class=\"item\"><span class=\"grow\">" + esc(i.text) + "</span>" +
+          "<button class=\"quiet\" data-act=\"now\" data-id=\"" + i.id + "\">今やる</button>" +
+          "<button class=\"quiet\" data-act=\"keep\" data-id=\"" + i.id + "\">残す</button>" +
+          "<button class=\"quiet\" data-act=\"drop\" data-id=\"" + i.id + "\">捨てる</button></div>").join("")
+      : "";
+  }
+  $("inboxList").onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    const item = state.inbox.find(x => x.id === b.dataset.id); if (!item) return;
+    if (b.dataset.act === "now") { $("labelInput").value = item.text; state.inbox = state.inbox.filter(x => x.id !== item.id); }
+    else if (b.dataset.act === "drop") state.inbox = state.inbox.filter(x => x.id !== item.id);
+    else item.kept = true;   // 残す（次回も出す）
+    persist(); renderInbox();
+  };
+
+  function closeEndOverlay() {
+    const memo = $("handoffInput").value.trim();
+    if (endedRecord) { endedRecord.handoff = memo; persist(); }
+    endedRecord = null;
+    state.inbox = state.inbox.filter(i => i.kept);
+    persist();
+    $("endOverlay").classList.remove("on");
+    render(); renderWeek();   // 閉じると、すでに始まっている休憩画面が現れる
+  }
+  $("btnEndClose").onclick = closeEndOverlay;
+  $("handoffInput").addEventListener("keydown", e => { if (e.key === "Enter") closeEndOverlay(); });
+
+  /* ================= TMR-025〜029 曜日ルーティン ================= */
+  const DAY_NAMES = ["日", "月", "火", "水", "木", "金", "土"];
+
+  // TMR-025 発火判定（曜日一致＋時刻到来。同じ日の二重発火は lastFiredKey で防ぐ）
+  function checkRoutines() {
+    const now = Clock.now(), parts = Clock.partsOf(now);
+    for (const r of state.routines) {
+      if (Core.isRoutineDue(r, now, parts)) {
+        Core.markRoutineFired(r, parts);
+        persist();
+        fire({ label: r.label, durationMin: r.durationMin, breakMin: r.breakMin, sets: r.sets, source: "routine", routineId: r.id });
+        renderPlans();
+        return true;
+      }
+    }
+    // TMR-029 自動復帰で pausedUntil が消えた場合だけ保存する（毎秒の書き込みを避ける）
+    if (state.routines.some(r => r.pausedUntil === null && r._wasPaused)) {
+      state.routines.forEach(r => { if (r.pausedUntil === null) r._wasPaused = false; });
+      persist();
+    }
+    state.routines.forEach(r => { if (r.pausedUntil) r._wasPaused = true; });
+    return false;
+  }
+
+  // 曜日チェックボックス
+  $("rtDays").innerHTML = DAY_NAMES.map((n, i) =>
+    "<label><input type=\"checkbox\" class=\"rtDay\" value=\"" + i + "\">" + n + "</label>").join(" ");
+  function selectedDays() {
+    return [...document.querySelectorAll(".rtDay")].filter(c => c.checked).map(c => Number(c.value));
+  }
+
+  $("btnAddRoutine").onclick = () => {
+    const days = selectedDays();
+    if (!days.length) { $("rtWarn").textContent = "曜日を1つ以上選んでください"; return; }
+    const sets = Core.clampSets($("rtSets").value);    // TMR-041
+    const r = Core.makeRoutine(days, $("rtTime").value || "09:00",
+      Math.max(1, Number($("rtMin").value) || 1), $("rtLabel").value.trim(),
+      sets > 1 ? Math.max(0, Number($("rtBreak").value) || 0) : 0, sets);
+    // TMR-028 登録前に重複を警告する（登録自体は許可する）
+    const dup = Core.overlappingRoutines(state.routines, r);
+    $("rtWarn").textContent = dup.length
+      ? "注意：《" + (dup[0].label || "無題") + " " + dup[0].time + "》と時間帯が重なっています（そのまま登録しました）"
+      : " ";
+    state.routines.push(r);
+    persist();
+    $("rtLabel").value = "";
+    renderPlans(); renderWeek();
+  };
+
+  // TMR-022 準拠の一覧（ルーティン側）
+  function renderRoutines() {
+    const list = state.routines.slice().sort((a, b) => Core.minutesOf(a.time) - Core.minutesOf(b.time));
+    $("rtList").innerHTML = list.length ? list.map(r => {
+      const paused = Core.isRoutinePaused(r, Clock.now());
+      return "<div class=\"item" + (r.enabled === false || paused ? " off" : "") + "\">" +
+        "<span class=\"num\">" + r.days.map(d => DAY_NAMES[d]).join("") + " " + r.time + "</span>" +
+        "<span class=\"grow\">" + esc(r.label || "（無題）") + "</span>" +
+        "<span class=\"aux num\">" + setsText(r) + "</span>" +
+        "<span class=\"aux\">" + (paused ? "今週はお休み" : (r.enabled === false ? "無効" : "有効")) +
+          " ／ 空振り " + Core.noShowCount(state.sessions, r.id) + "回</span>" +
+        "<button class=\"quiet\" data-act=\"pause\" data-id=\"" + r.id + "\">" + (paused ? "お休みを解除" : "今週はお休み") + "</button>" +
+        "<button class=\"quiet\" data-act=\"toggle\" data-id=\"" + r.id + "\">" + (r.enabled === false ? "有効化" : "無効化") + "</button>" +
+        "<button class=\"quiet\" data-act=\"del\" data-id=\"" + r.id + "\">削除</button></div>";
+    }).join("") : "<div class=\"aux\">ルーティンはありません</div>";
+  }
+
+  $("rtList").onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    const r = state.routines.find(x => x.id === b.dataset.id); if (!r) return;
+    if (b.dataset.act === "del") state.routines = state.routines.filter(x => x.id !== r.id);
+    else if (b.dataset.act === "toggle") r.enabled = r.enabled === false;
+    // TMR-029 今週はお休み（翌週の同じ曜日を過ぎたら自動で有効に戻る）
+    else if (b.dataset.act === "pause") r.pausedUntil = r.pausedUntil ? null : Clock.now() + 7 * 24 * 3600 * 1000;
+    persist(); renderPlans(); renderWeek();
+  };
+
+  // 次のルーティン発生時刻（フッター表示用）
+  function nextRoutineOccurrence(now) {
+    const parts = Clock.partsOf(now);
+    let best = null;
+    for (const r of state.routines) {
+      if (r.enabled === false || Core.isRoutinePaused(r, now)) continue;
+      for (let ahead = 0; ahead < 8; ahead++) {
+        const day = (parts.day + ahead) % 7;
+        if (r.days.indexOf(day) === -1) continue;
+        const mins = Core.minutesOf(r.time);
+        const at = Clock.atLocal(parts.y, parts.mo, parts.d + ahead, Math.floor(mins / 60), mins % 60);
+        if (at > now) { if (!best || at < best.at) best = { at: at, label: r.label, min: r.durationMin }; break; }
+      }
+    }
+    return best;
+  }
+
+  // TMR-027 週間ビュー（月〜日 × 時刻。クリックで編集）
+  function renderWeek() {
+    const order = [1, 2, 3, 4, 5, 6, 0];
+    const hours = [];
+    let minH = 23, maxH = 0;
+    state.routines.forEach(r => {
+      const h = Math.floor(Core.minutesOf(r.time) / 60);
+      const e = Math.floor((Core.minutesOf(r.time) + r.durationMin) / 60);
+      minH = Math.min(minH, h); maxH = Math.max(maxH, e);
+    });
+    if (!state.routines.length) { minH = 8; maxH = 18; }
+    for (let h = Math.max(0, minH); h <= Math.min(23, maxH); h++) hours.push(h);
+    let html = "<table><tr><th>時刻</th>" + order.map(d => "<th>" + DAY_NAMES[d] + "</th>").join("") + "</tr>";
+    for (const h of hours) {
+      html += "<tr><td class=\"num\">" + String(h).padStart(2, "0") + ":00</td>";
+      for (const d of order) {
+        const hits = state.routines.filter(r => r.days.indexOf(d) !== -1 && Math.floor(Core.minutesOf(r.time) / 60) === h);
+        html += "<td" + (hits.length ? " class=\"blk\"" : "") + ">" +
+          hits.map(r => "<button class=\"quiet\" data-edit=\"" + r.id + "\">" + r.time + " " + esc(r.label || "無題") +
+            "（" + Core.formatMinutesJa(Core.totalMinutes(r.durationMin, r.breakMin, r.sets)) +
+            (Core.clampSets(r.sets) > 1 ? " / " + Core.clampSets(r.sets) + "セット" : "") + "）</button>").join("<br>") +
+          "</td>";
+      }
+      html += "</tr>";
+    }
+    $("weekTable").innerHTML = "<div class=\"tablewrap\">" + html + "</table></div>";
+    renderHeatmap();
+  }
+
+  // クリックで編集（フォームに読み込み、元の1件は削除して再登録する形）
+  $("weekTable").onclick = e => {
+    const b = e.target.closest("button[data-edit]"); if (!b) return;
+    const r = state.routines.find(x => x.id === b.dataset.edit); if (!r) return;
+    show("plansScreen");
+    $("rtTime").value = r.time; $("rtMin").value = r.durationMin;
+    $("rtLabel").value = r.label; $("rtBreak").value = r.breakMin;
+    $("rtSets").value = Core.clampSets(r.sets === undefined ? 1 : r.sets); syncRtInputs();   // TMR-041
+    document.querySelectorAll(".rtDay").forEach(c => { c.checked = r.days.indexOf(Number(c.value)) !== -1; });
+    state.routines = state.routines.filter(x => x.id !== r.id);
+    persist();
+    $("rtWarn").textContent = "編集中：内容を直して［登録］を押してください";
+    renderPlans(); renderWeek();
+  };
+  /* ================= TMR-016〜024 予約起動 ================= */
+
+  // TMR-020 / TMR-042【2】 旧・強制アラーム（鳴り続ける音）は廃止した。
+  // 発火時に鳴らすのは playCue("start") ただ1つで、約2.9秒で必ず自分から止まる。
+
+  let firedContext = null; // 発火中の予約／ルーティン情報
+
+  // TMR-018 強制起動: ①全画面を試みる ②起動音 ③起動中表示 ④自動スタート
+  function fire(plan) {
+    if (state.settings.autoFullscreen) tryEnterFullscreen();   // 拒否されても以降を止めない
+    firedContext = { plan: plan, firedAt: Clock.now(), acked: false, skipped: false };
+    $("skipWrap").style.display = "none";
+    $("skipReason").value = "";
+    $("fireLabel").textContent = plan.label || " ";
+    $("fireHandoff").textContent = handoffTextFor(plan.label);
+    $("fireOverlay").classList.add("on");
+    // TMR-041 セット数ぶんの進行をここから始める（開始音は startSets の中で1回だけ鳴る）
+    startSets({ label: plan.label, durationMin: plan.durationMin, breakMin: plan.breakMin,
+                sets: plan.sets, source: plan.source || "reservation" });
+    notify("開始します", plan.label || "");
+  }
+
+  // TMR-019 起動中画面のボタン
+  $("btnAck").onclick = () => {
+    // TMR-042【2】 役割は「鳴っている音を途中で止める」ことと「席にいた記録」の2つだけ。
+    // 押しても押さなくてもタイマーの進行はまったく変わらない（TMR-021）。
+    Sound.stopAll();
+    if (firedContext) firedContext.acked = true;   // TMR-034 空振り判定の材料（1セット目のみ）
+    $("fireOverlay").classList.remove("on");
+  };
+  // TMR-026 「今日はやらない」は理由を1行書かせる（空欄でも進める）
+  $("btnSkip").onclick = () => { Sound.stopAll(); $("skipWrap").style.display = "flex"; $("skipReason").focus(); };
+  $("btnSkipOk").onclick = () => finishSkip();
+  $("skipReason").addEventListener("keydown", e => { if (e.key === "Enter") finishSkip(); });
+  function finishSkip() {
+    const reason = $("skipReason").value.trim();
+    if (firedContext) {
+      // TMR-034 「今日はやらない」も理由とともに空振りに含める
+      recordSession({ skipped: true, skipReason: reason, acked: false, noShow: true,
+                      label: firedContext.plan.label, plannedMin: firedContext.plan.durationMin,
+                      source: firedContext.plan.source || "reservation",
+                      routineId: firedContext.plan.routineId || null,
+                      startedAt: firedContext.firedAt, endedAt: Clock.now(), actualSec: 0, overSec: 0,
+                      groupId: T.groupId, setIndex: 1, setTotal: T.setTotal });   // TMR-041
+      firedContext.recorded = true;
+      firedContext = null;
+    }
+    Sound.stopAll();
+    $("fireOverlay").classList.remove("on");
+    T.mode = "idle"; T.pausedRemain = T.plannedMs;
+    render();
+  }
+
+  // TMR-017 1秒ごとの発火判定（発火済みフラグを立ててから処理する）
+  function checkDue() {
+    const now = Clock.now();
+    const due = Core.dueReservations(state.reservations, now);
+    if (due.length) {
+      const r = due[0];
+      due.forEach(Core.markFired);        // 先にフラグ
+      persist();
+      fire({ label: r.label, durationMin: r.durationMin, breakMin: r.breakMin, sets: r.sets, source: "reservation" });
+      renderPlans();
+      return true;
+    }
+    return false;
+  }
+
+  // TMR-022 予約一覧（時刻順・削除・無効化）
+  function renderPlans() {
+    const list = state.reservations.slice().sort((a, b) => a.at - b.at);
+    $("resList").innerHTML = list.length ? list.map(r => {
+      const p = Clock.partsOf(r.at);
+      const time = (p.mo + 1) + "/" + p.d + " " + String(p.h).padStart(2, "0") + ":" + String(p.mi).padStart(2, "0");
+      return "<div class=\"item" + (r.enabled === false ? " off" : "") + "\">" +
+        "<span class=\"num\">" + time + "</span>" +
+        "<span class=\"grow\">" + esc(r.label || "（無題）") + "</span>" +
+        "<span class=\"aux num\">" + setsText(r) + "</span>" +
+        "<span class=\"aux\">" + (r.fired ? "発火済" : (r.enabled === false ? "無効" : "待機")) + "</span>" +
+        "<button class=\"quiet\" data-act=\"toggle\" data-id=\"" + r.id + "\">" + (r.enabled === false ? "有効化" : "無効化") + "</button>" +
+        "<button class=\"quiet\" data-act=\"del\" data-id=\"" + r.id + "\">削除</button></div>";
+    }).join("") : "<div class=\"aux\">予約はありません</div>";
+    renderRoutines();
+    renderNextUp();
+  }
+  // TMR-041 一覧には「作業45分 ／ 休憩10分 × 4セット（合計 3時間30分）」の形で出す
+  function setsText(r) {
+    const sets = Core.clampSets(r.sets === undefined ? 1 : r.sets);
+    const breakMin = sets > 1 ? (r.breakMin || 0) : 0;
+    return "作業" + r.durationMin + "分" + (breakMin ? " ／ 休憩" + breakMin + "分" : "") +
+      (sets > 1 ? " × " + sets + "セット（合計 " + Core.formatMinutesJa(Core.totalMinutes(r.durationMin, breakMin, sets)) + "）" : "");
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c])); }
+
+  $("resList").onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    const r = state.reservations.find(x => x.id === b.dataset.id); if (!r) return;
+    if (b.dataset.act === "del") state.reservations = state.reservations.filter(x => x.id !== r.id);
+    else r.enabled = r.enabled === false;
+    persist(); renderPlans();
+  };
+
+  // TMR-016 単発予約の登録
+  $("btnAddRes").onclick = () => {
+    const v = $("resAt").value;
+    if (!v) { $("resWarn").textContent = "日時を入れてください"; return; }
+    const at = Clock.parse(v);
+    const min = Math.max(1, Number($("resMin").value) || 1);
+    const sets = Core.clampSets($("resSets").value);   // TMR-041
+    const breakMin = sets > 1 ? Math.max(0, Number($("resBreak").value) || 0) : 0;
+    const r = Core.makeReservation(at, min, $("resLabel").value.trim(), breakMin, sets);
+    state.reservations.push(r);
+    persist();
+    $("resWarn").textContent = at <= Clock.now() ? "過去の時刻のため、すぐに発火します" : " ";
+    $("resLabel").value = "";
+    renderPlans();
+  };
+
+  // 次の予定（画面下部）
+  function renderNextUp() {
+    const now = Clock.now();
+    const next = state.reservations.filter(r => r.enabled !== false && !r.fired && r.at > now).sort((a, b) => a.at - b.at)[0];
+    const nextRt = nextRoutineOccurrence(now);
+    let best = null;
+    if (next) best = { at: next.at, label: next.label, min: next.durationMin };
+    if (nextRt && (!best || nextRt.at < best.at)) best = nextRt;
+    if (!best) { $("nextUp").textContent = " "; return; }
+    const p = Clock.partsOf(best.at);
+    $("nextUp").textContent = "次 → " + String(p.h).padStart(2, "0") + ":" + String(p.mi).padStart(2, "0") +
+      " " + (best.label || "（無題）") + "（" + best.min + "分）";
+  }
+
+  // TMR-024 起動時リカバリ
+  let recoverTarget = null;
+  function checkRecovery() {
+    const now = Clock.now();
+    const list = Core.recoverableReservations(state.reservations, now, state.settings.recoveryWindowMin);
+    if (!list.length) return;
+    recoverTarget = list[0];
+    const p = Clock.partsOf(recoverTarget.at);
+    $("recoverText").textContent = String(p.h).padStart(2, "0") + ":" + String(p.mi).padStart(2, "0") +
+      "の《" + (recoverTarget.label || "無題") + "》を取り逃しました" +
+      (list.length > 1 ? "（ほかに" + (list.length - 1) + "件）" : "");
+    $("recoverOverlay").classList.add("on");
+  }
+  $("btnRecStart").onclick = () => {
+    const r = recoverTarget; $("recoverOverlay").classList.remove("on");
+    if (!r) return;
+    // 取り逃した分はすべて発火済みにする（これから始める1件以外が後で無警告に鳴らないようにする）
+    const others = Core.recoverableReservations(state.reservations, Clock.now(), state.settings.recoveryWindowMin)
+      .filter(x => x.id !== r.id);
+    others.forEach(Core.markFired); Core.markFired(r);
+    persist(); recoverTarget = null; renderPlans();
+    // 見送った分はユーザーに見える形で知らせる（無言で消さない）
+    if (others.length) flash("ほか" + others.length + "件の取り逃しは見送りました", 12);
+    fire({ label: r.label, durationMin: r.durationMin, breakMin: r.breakMin, sets: r.sets, source: "reservation" });
+  };
+  $("btnRecSkip").onclick = () => {
+    if (recoverTarget) { Core.markFired(recoverTarget); persist(); }
+    recoverTarget = null; $("recoverOverlay").classList.remove("on"); renderPlans();
+    checkRecovery();          // 取り逃しが複数あれば次の1件を続けて提示する
+  };
+
+  // 内部から使えるように公開（予約起動などが後続フェーズで使う）
+  // 内部から使えるように公開（セルフテストと後続フェーズの確認に使う）
+  window.KOKO = { state, persist, Sound, Preview, T, start, pause, reset, show, render, notify,
+                  tryEnterFullscreen, startBreak, applyScale,
+                  // TMR-041 / TMR-042 の進行と入力同期（画面を触らずに流れを確かめるための入口）
+                  fire, startSets, playCue, endHere, leaveBreak,
+                  syncManualInputs, syncResInputs, syncRtInputs };
+
+  // TMR-041【1】【2】 起動時に休憩欄の有効・無効と合計時間の1行をそろえる
+  syncManualInputs(); syncResInputs(); syncRtInputs();
+  renderPlans();
+  renderWeek();
+  render();
+  if (new URLSearchParams(location.search).get("selftest") === "1") runSelfTest();
+})();
+</script>
+</body>
+</html>
