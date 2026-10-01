@@ -37,6 +37,11 @@ button{border:1px solid var(--line);border-radius:4px;padding:var(--pad-btn-y) v
 button:hover{border-color:var(--fg)}
 button.quiet{border:0;padding:0;background:none;color:var(--sub);font-size:var(--f-aux);text-decoration:underline;}
 button[disabled]{color:var(--sub);border-color:var(--line);cursor:default;opacity:.5;}
+/* TMR-044 強制終了（小さく目立たない。長押し中はボタンの中で帯が左から右へ伸びる） */
+button.forceEnd{--p:0%;font-size:var(--f-aux);color:var(--sub);padding:var(--sp1) var(--sp2);
+  background-image:linear-gradient(to right, var(--line) var(--p), transparent var(--p));
+  user-select:none;-webkit-user-select:none;touch-action:none;-webkit-touch-callout:none;}
+.forceWrap{justify-content:center;margin-top:var(--sp3)}
 input[type=text],input[type=time],input[type=number],input[type=datetime-local],select{
   border:1px solid var(--line);border-radius:4px;padding:var(--sp1);background:var(--bg);
 }
@@ -126,6 +131,10 @@ table button.quiet{font-size:var(--f-aux)}
     <div class="row" style="justify-content:center;margin-top:var(--sp3)">
       <button id="btnStart">開始</button>
       <span class="aux">Space</span>
+    </div>
+    <!-- TMR-044 強制終了。作業中（一時停止中を含む）だけ出す -->
+    <div id="forceWrapMain" class="row forceWrap" style="display:none">
+      <button class="forceEnd" type="button" tabindex="-1">強制終了（10秒長押し）</button>
     </div>
     <div id="presets" class="row" style="justify-content:center"></div>
     <!-- TMR-041【1】 手動タイマーにも 作業（分）／休憩（分）／セット数 を1行で置く -->
@@ -247,6 +256,10 @@ table button.quiet{font-size:var(--f-aux)}
   <div id="skipWrap" class="row" style="justify-content:center;margin-top:var(--sp3);display:none">
     <input id="skipReason" type="text" placeholder="理由を1行（例：来客）" size="28">
     <button id="btnSkipOk">記録して閉じる</button>
+  </div>
+  <!-- TMR-044 起動中画面にも強制終了を置く（TMR-019 の改定） -->
+  <div id="forceWrapFire" class="row forceWrap" style="display:none">
+    <button class="forceEnd" type="button" tabindex="-1">強制終了（10秒長押し）</button>
   </div>
 </div>
 
@@ -376,6 +389,9 @@ const SOUND = {
   ATTACK_SEC: 0.003,       // 【6】 立ち上がり：ゼロから最大へ（長くすると鋭さが失われる）
   RELEASE_SEC: 0.010       // 【6】 終わり際：最大からゼロへ（途中で止めるときも同じ秒数で絞る）
 };
+
+// TMR-044 強制終了ボタンの長押し秒数（押し間違いで終わらないための長さ）
+const FORCE_END_HOLD_SEC = 10;
 
 // TMR-036 ロジックとDOMの分離（この中から document / window を参照しないこと）
 const Core = {
@@ -541,6 +557,12 @@ const Core = {
 
   // TMR-012 音量 0-100 を gain(0-1) に変換
   gainFor(volume) { return Math.max(0, Math.min(100, Number(volume) || 0)) / 100; },
+  // TMR-044 長押しの進み具合（押し始め・いま・必要秒数 → 経過割合・残り秒数・完了したか）
+  holdProgress(downAt, now, holdSec) {
+    const need = holdSec * 1000, held = Math.max(0, now - downAt);
+    return { ratio: Math.min(1, held / need), remainSec: Math.max(0, Math.ceil((need - held) / 1000)), done: held >= need };
+  },
+
   // TMR-043【1】 マスターGain ＝（音量% ÷ 100）× 4.0。0 で完全に無音、100 で最大
   masterGainFor(volume) { return Core.gainFor(volume) * SOUND.MASTER_BOOST; },
   // TMR-043【2】【3】 1音を鳴らすオシレータの一覧（三角波の和音3本 ＋ それぞれに矩形波を 0.4 で重ねる）
@@ -1168,6 +1190,20 @@ function runSelfTest(log) {
     sq.forEach((x, i) => ok(Math.abs(x.gain - tri[i].gain * 0.4) < 1e-9, "矩形波は構成音の 0.4"));
   });
 
+  t("TMR-044 長押しの進み具合（10秒で強制終了）", () => {
+    eq(FORCE_END_HOLD_SEC, 10);
+    const p0 = Core.holdProgress(1000, 1000, 10);
+    eq(p0.ratio, 0); eq(p0.remainSec, 10); ng(p0.done);
+    const p1 = Core.holdProgress(1000, 1000 + 7200, 10);
+    eq(p1.remainSec, 3, "7.2秒押したら あと3秒"); ng(p1.done, "途中では終わらない");
+    ok(Math.abs(p1.ratio - 0.72) < 1e-9);
+    ng(Core.holdProgress(0, 9999, 10).done, "9.999秒では終わらない");
+    const p2 = Core.holdProgress(0, 10000, 10);
+    ok(p2.done); eq(p2.ratio, 1); eq(p2.remainSec, 0);
+    eq(Core.holdProgress(0, 99999, 10).ratio, 1, "超えても 100% で止まる");
+    eq(Core.holdProgress(5000, 1000, 10).ratio, 0, "時計が戻っても負にならない");
+  });
+
   t("TMR-043 音量の引き上げ（v2 → v3 を一度だけ）", () => {
     const low = { version: 2, settings: { volume: 70, tone: "chime" } };
     ok(Core.migrateToV3(low).migrated);
@@ -1524,6 +1560,9 @@ function runSelfTest(log) {
     if (flashMsg && Clock.now() < flashMsg.until) hint = flashMsg.text;
     else if (flashMsg) flashMsg = null;
     $("hint").textContent = hint;
+    // TMR-044 強制終了は作業中（一時停止中を含む）だけ出す。休憩中・待機中は出さない
+    const working = T.mode === "running" || T.mode === "paused";
+    ["forceWrapMain", "forceWrapFire"].forEach(id => { const d = working ? "flex" : "none"; if ($(id).style.display !== d) $(id).style.display = d; });
     // TMR-033 休憩中は全画面の休憩画面に残り時間を出す
     if (T.mode === "break") $("breakTime").textContent = Core.formatDuration(Math.max(0, remain));
     // TMR-030 見積り較正の表示
@@ -1925,6 +1964,41 @@ function runSelfTest(log) {
     finishAll();
   }
 
+  // TMR-044 強制終了。作業中（一時停止中を含む）だけ受け付け、残りのセットは実行しない。
+  // そこまでの実績は通常の終了と同じ道（recordSetSession → finishAll）で記録する。音は鳴らさない。
+  function forceEnd() {
+    if (T.mode !== "running" && T.mode !== "paused") return;
+    Sound.stopAll();                               // 鳴っている音は止めるが、終了の音は鳴らさない
+    if (firedContext && $("fireOverlay").classList.contains("on")) firedContext.acked = true;   // 起動中画面で押した＝席にいた
+    recordSetSession();
+    finishAll();
+  }
+
+  // TMR-044 10秒の長押し。押している間は帯と残り秒数を見せ、離したら元に戻して何もしない
+  const forceLabel = "強制終了（" + FORCE_END_HOLD_SEC + "秒長押し）";
+  document.querySelectorAll(".forceEnd").forEach(b => {
+    let downAt = 0, raf = 0;
+    const paint = (ratio, text) => { b.style.setProperty("--p", (ratio * 100) + "%"); b.textContent = text; };
+    const cancel = () => { downAt = 0; cancelAnimationFrame(raf); paint(0, forceLabel); };
+    const step = () => {
+      if (!downAt) return;
+      if (T.mode !== "running" && T.mode !== "paused") { cancel(); return; }   // 長押し中に休憩へ移ったら取り消す
+      const p = Core.holdProgress(downAt, Clock.now(), FORCE_END_HOLD_SEC);
+      if (p.done) { cancel(); forceEnd(); return; }
+      paint(p.ratio, "あと" + p.remainSec + "秒…");
+      raf = requestAnimationFrame(step);
+    };
+    paint(0, forceLabel);
+    b.addEventListener("pointerdown", e => {
+      if (e.button !== 0) return;
+      e.preventDefault();                          // フォーカスを移さない（キーボードでは動かさない／Space で誤作動させない）
+      downAt = Clock.now(); step();
+    });
+    // 指を離す・ボタンの外に出る・操作が取り消される → 元に戻して何もしない
+    ["pointerup", "pointerleave", "pointercancel"].forEach(ev => b.addEventListener(ev, cancel));
+    b.addEventListener("contextmenu", e => e.preventDefault());   // タッチの長押しメニューを出さない
+  });
+
   function renderInbox() {
     $("inboxList").innerHTML = state.inbox.length
       ? "<div class=\"aux\">今回の割り込み</div>" + state.inbox.map(i =>
@@ -2260,6 +2334,7 @@ function runSelfTest(log) {
                   tryEnterFullscreen, startBreak, applyScale,
                   // TMR-041 / TMR-042 の進行と入力同期（画面を触らずに流れを確かめるための入口）
                   fire, startSets, playCue, endHere, leaveBreak,
+                  forceEnd,   // TMR-044
                   syncManualInputs, syncResInputs, syncRtInputs };
 
   // TMR-041【1】【2】 起動時に休憩欄の有効・無効と合計時間の1行をそろえる
