@@ -196,13 +196,7 @@ table button.quiet{font-size:var(--f-aux)}
       <!-- TMR-039 表示の大きさ（画面全体の倍率） -->
       <label class="row">表示の大きさ <input id="setScale" type="range" min="0.8" max="1.6" step="0.05"> <span id="scaleVal" class="aux num"></span></label>
       <label class="row">音量 <input id="setVolume" type="range" min="0" max="100"> <span id="volumeVal" class="aux num"></span></label>
-      <label class="row">音色
-        <select id="setTone">
-          <option value="sine">正弦波</option>
-          <option value="triangle">三角波</option>
-          <option value="chime">チャイム和音</option>
-        </select>
-      </label>
+      <!-- TMR-043 音色の選択は廃止（三角波＋矩形波の和音1種に固定） -->
       <!-- TMR-040 / TMR-042【5】 試聴は4つ。本番とまったく同じ鳴り方をして約2.9秒で自ら止まる -->
       <div>
         <div class="row">
@@ -348,7 +342,7 @@ const CUE = {
   PHRASE_GAP_SEC: 0.06,    // フレーズとフレーズの間
   BURST_REPEAT: 2,         // かたまりのくり返し回数
   BURST_GAP_SEC: 0.55,     // かたまりとかたまりの間
-  BURST_GAINS: [0.8, 1.0], // 1かたまり目 80% / 2かたまり目 100%
+  // TMR-043【4】 かたまりごとの音量の段階（旧 80% → 100%）は廃止。最初から最後まで最大音量で鳴らす
   // 音の向きで4つを聞き分ける（上がる＝これから動く／下がる＝ひと区切り）
   PHRASES: {
     start:   [440, 554, 659],   // ① 作業の開始        上がる3音
@@ -356,6 +350,31 @@ const CUE = {
     toWork:  [440, 659],        // ③ 休憩 → 作業       上がる2音
     finish:  [659, 554, 440]    // ④ 全セット終了      下がる3音
   }
+};
+
+// TMR-043 音量と音色の定数。音の大きさ・硬さを変えたいときは、この表の数字だけを直せばよい。
+// 経路： 各オシレータ → 個別のGain → まとめ役のGain → コンプレッサー → マスターGain → destination
+const SOUND = {
+  MASTER_BOOST: 4.0,       // 【1】 マスターGain ＝（音量% ÷ 100）× この倍率
+  BUS_GAIN: 1.0,           // 【1】 まとめ役のGain
+  COMPRESSOR: {            // 【1】 DynamicsCompressorNode（波形の頭を抑えて、4倍しても割れないようにする）
+    threshold: -18,
+    knee: 6,
+    ratio: 12,
+    attack: 0.002,
+    release: 0.1
+  },
+  // 【2】 1音を和音にする（周波数の倍率と音量）
+  CHORD: [
+    { ratio: 1.0, gain: 1.0 },   // 基音
+    { ratio: 1.5, gain: 0.6 },   // 完全5度上
+    { ratio: 2.0, gain: 0.5 }    // 1オクターブ上
+  ],
+  WAVE: "triangle",        // 【3】 主となる音
+  LAYER_WAVE: "square",    // 【3】 重ねる音
+  LAYER_GAIN: 0.4,         // 【3】 重ねる音の量（構成音の音量に対する比）
+  ATTACK_SEC: 0.003,       // 【6】 立ち上がり：ゼロから最大へ（長くすると鋭さが失われる）
+  RELEASE_SEC: 0.010       // 【6】 終わり際：最大からゼロへ（途中で止めるときも同じ秒数で絞る）
 };
 
 // TMR-036 ロジックとDOMの分離（この中から document / window を参照しないこと）
@@ -457,7 +476,21 @@ const Core = {
         if (!(Number(s.setTotal) >= 1)) { s.setTotal = 1; out.migrated = true; }
       }
     }
-    if (d.version !== 2) { d.version = 2; out.migrated = true; }
+    // TMR-043 v3 以上のデータを 2 に戻さない（v3 の移行は migrateToV3 が受け持つ）
+    if (!(Number(d.version) >= 2)) { d.version = 2; out.migrated = true; }
+    return out;
+  },
+
+  // TMR-043【5】 v2 → v3：音量が 70 以下なら一度だけ 100 に引き上げ、廃止した音色 tone を消す。
+  // version が 3 になったら二度と走らない（その後に利用者が下げた音量は尊重する）
+  migrateToV3(d) {
+    const out = { migrated: false };
+    if (!d || typeof d !== "object" || Number(d.version) >= 3) return out;
+    if (!d.settings || typeof d.settings !== "object") d.settings = {};
+    if (!(Number(d.settings.volume) > 70)) d.settings.volume = 100;   // 数値でない場合も 100 に寄せる
+    delete d.settings.tone;
+    d.version = 3;
+    out.migrated = true;
     return out;
   },
 
@@ -476,17 +509,17 @@ const Core = {
   cueSec(kind) {
     return CUE.BURST_REPEAT * Core.burstSec(kind) + (CUE.BURST_REPEAT - 1) * CUE.BURST_GAP_SEC;
   },
-  // 1音ずつの発音予定（開始秒・周波数・音量倍率）。本番も試聴もこの並びをそのまま鳴らす
+  // 1音ずつの発音予定（開始秒・周波数・長さ）。本番も試聴もこの並びをそのまま鳴らす
+  // TMR-043【4】 音量の段階は持たない（全部の音が同じ最大音量）
   cueSchedule(kind) {
     const phrase = Core.phraseOf(kind);
     if (!phrase) return [];
     const out = [];
     let t = 0;
     for (let b = 0; b < CUE.BURST_REPEAT; b++) {
-      const gain = CUE.BURST_GAINS[b] === undefined ? 1 : CUE.BURST_GAINS[b];
       for (let r = 0; r < CUE.PHRASE_REPEAT; r++) {
         for (let i = 0; i < phrase.length; i++) {
-          out.push({ at: t, freq: phrase[i], dur: CUE.NOTE_SEC, gain: gain });
+          out.push({ at: t, freq: phrase[i], dur: CUE.NOTE_SEC });
           t += CUE.NOTE_SEC + (i < phrase.length - 1 ? CUE.NOTE_GAP_SEC : 0);
         }
         if (r < CUE.PHRASE_REPEAT - 1) t += CUE.PHRASE_GAP_SEC;
@@ -508,6 +541,17 @@ const Core = {
 
   // TMR-012 音量 0-100 を gain(0-1) に変換
   gainFor(volume) { return Math.max(0, Math.min(100, Number(volume) || 0)) / 100; },
+  // TMR-043【1】 マスターGain ＝（音量% ÷ 100）× 4.0。0 で完全に無音、100 で最大
+  masterGainFor(volume) { return Core.gainFor(volume) * SOUND.MASTER_BOOST; },
+  // TMR-043【2】【3】 1音を鳴らすオシレータの一覧（三角波の和音3本 ＋ それぞれに矩形波を 0.4 で重ねる）
+  voicesFor(freq) {
+    const out = [];
+    for (const c of SOUND.CHORD) {
+      out.push({ type: SOUND.WAVE, freq: freq * c.ratio, gain: c.gain });
+      out.push({ type: SOUND.LAYER_WAVE, freq: freq * c.ratio, gain: c.gain * SOUND.LAYER_GAIN });
+    }
+    return out;
+  },
 
   /* ---------- TMR-030 超過計測と見積り較正 ---------- */
 
@@ -705,8 +749,9 @@ const Store = {
   _mem: null,
   defaults() {
     return {
-      version: 2,   // TMR-041【6】 1 → 2（sets / groupId / setIndex / setTotal を導入）
-      settings: { volume: 70, tone: "sine", autoFullscreen: true, recoveryWindowMin: 15, defaultBreakMin: 10,
+      // TMR-043【5】 version 3。音量の既定は 100、音色 tone は廃止
+      version: 3,   // TMR-041【6】 1 → 2（sets / groupId / setIndex / setTotal を導入）／ TMR-043 2 → 3
+      settings: { volume: 100, autoFullscreen: true, recoveryWindowMin: 15, defaultBreakMin: 10,
                   uiScale: 1.0 },   // TMR-039
       reservations: [], routines: [], sessions: [], inbox: []
     };
@@ -747,9 +792,11 @@ const Store = {
                    ? "古い保存データを読み込み、セット数を1として補いました" : "");
     } catch (e) {
       // 移行で落ちても既存データは返す（壊さない）
-      d.version = 2;
+      if (!(Number(d.version) >= 2)) d.version = 2;
       this.warn = "保存データの移行に失敗したため、足りない項目を既定値で補いました";
     }
+    // TMR-043【5】 v2 → v3（音量の一度だけの引き上げ）。データの欠損ではないので赤帯は出さない
+    Core.migrateToV3(d);
     return d;
   }
 };
@@ -1069,8 +1116,9 @@ function runSelfTest(log) {
     // かたまりの間は 0.55秒（1かたまり目の最後の音の終わりから、2かたまり目の頭まで）
     const first = sched[8], second = sched[9];
     ok(Math.abs((second.at - (first.at + CUE.NOTE_SEC)) - 0.55) < 1e-9, "かたまりの間は0.55秒");
-    // 音量は 1かたまり目 80% → 2かたまり目 100%
-    eq(sched[0].gain, 0.8); eq(sched[9].gain, 1.0);
+    // TMR-043【4】 音量の段階は無い（1かたまり目も2かたまり目も同じ最大音量）
+    eq(CUE.BURST_GAINS, undefined, "かたまりごとの音量差は廃止");
+    ok(sched.every(n => n.gain === undefined), "予定表に音量の段階を持たない");
     eq(CUE.PHRASE_REPEAT, 3); eq(CUE.BURST_REPEAT, 2);
   });
 
@@ -1084,11 +1132,61 @@ function runSelfTest(log) {
     eq(dir("start"), "up"); eq(dir("toBreak"), "down");
     eq(dir("toWork"), "up"); eq(dir("finish"), "down");
     eq(Core.phraseOf("存在しない"), null);
-    // 4つとも同じ構造・同じ音量で鳴る
+    // 4つとも同じ構造・同じ長さで鳴る
     Core.cueKinds().forEach(k => {
       eq(Core.cueSchedule(k).length, Core.phraseOf(k).length * 3 * 2, k);
-      eq(Core.cueSchedule(k)[0].gain, 0.8, k);
+      ok(Core.cueSchedule(k).every(n => n.dur === CUE.NOTE_SEC), k);
     });
+  });
+
+  t("TMR-043 マスター音量（音量% ÷ 100 × 4.0）", () => {
+    eq(Core.masterGainFor(0), 0, "0 で完全に無音");
+    eq(Core.masterGainFor(50), 2.0);
+    eq(Core.masterGainFor(100), 4.0, "100 で最大");
+    eq(Core.masterGainFor(999), 4.0); eq(Core.masterGainFor(-5), 0); eq(Core.masterGainFor("x"), 0);
+    // 途中の値でも段階的に変化する（単調に増える）
+    for (let v = 1; v <= 100; v++) ok(Core.masterGainFor(v) > Core.masterGainFor(v - 1), "v=" + v);
+  });
+
+  t("TMR-043 音の定数", () => {
+    eq(SOUND.MASTER_BOOST, 4.0); eq(SOUND.BUS_GAIN, 1.0);
+    eq(SOUND.COMPRESSOR.threshold, -18); eq(SOUND.COMPRESSOR.knee, 6); eq(SOUND.COMPRESSOR.ratio, 12);
+    eq(SOUND.COMPRESSOR.attack, 0.002); eq(SOUND.COMPRESSOR.release, 0.1);
+    eq(SOUND.CHORD.map(c => c.ratio + ":" + c.gain).join(","), "1:1,1.5:0.6,2:0.5");
+    eq(SOUND.WAVE, "triangle"); eq(SOUND.LAYER_WAVE, "square"); eq(SOUND.LAYER_GAIN, 0.4);
+    eq(SOUND.ATTACK_SEC, 0.003); eq(SOUND.RELEASE_SEC, 0.010);
+    ok(SOUND.ATTACK_SEC + SOUND.RELEASE_SEC < CUE.NOTE_SEC, "立ち上がりと終わり際が1音の長さに収まる");
+    ok(SOUND.ATTACK_SEC + SOUND.RELEASE_SEC < Core.CHECK_SEC, "確認音にも収まる");
+  });
+
+  t("TMR-043 1音の構成（三角波の和音3本 ＋ 矩形波3本）", () => {
+    const v = Core.voicesFor(440);
+    eq(v.length, 6);
+    const tri = v.filter(x => x.type === "triangle"), sq = v.filter(x => x.type === "square");
+    eq(tri.map(x => x.freq + ":" + x.gain).join(","), "440:1,660:0.6,880:0.5", "基音・5度上・オクターブ上");
+    eq(sq.map(x => x.freq).join(","), "440,660,880");
+    sq.forEach((x, i) => ok(Math.abs(x.gain - tri[i].gain * 0.4) < 1e-9, "矩形波は構成音の 0.4"));
+  });
+
+  t("TMR-043 音量の引き上げ（v2 → v3 を一度だけ）", () => {
+    const low = { version: 2, settings: { volume: 70, tone: "chime" } };
+    ok(Core.migrateToV3(low).migrated);
+    eq(low.settings.volume, 100, "70 以下は 100 に");
+    eq(low.settings.tone, undefined, "音色は廃止");
+    eq(low.version, 3);
+    const high = { version: 2, settings: { volume: 85 } };
+    Core.migrateToV3(high); eq(high.settings.volume, 85, "71 以上はそのまま");
+    const odd = { version: 2, settings: { volume: "ごみ" } };
+    Core.migrateToV3(odd); eq(odd.settings.volume, 100, "数値でなければ 100");
+    // v3 になった後に下げた音量は、次に開いても引き上げ直さない
+    low.settings.volume = 30;
+    ng(Core.migrateToV3(low).migrated); eq(low.settings.volume, 30);
+    // v1 は v1 → v2 → v3 と続けて移行でき、v2 の移行が v3 を 2 に戻さない
+    const v1 = { version: 1, settings: { volume: 50 }, reservations: [], routines: [], sessions: [], inbox: [] };
+    Core.migrateToV2(v1); Core.migrateToV3(v1);
+    eq(v1.version, 3); eq(v1.settings.volume, 100);
+    Core.migrateToV2(v1); eq(v1.version, 3, "v2 の移行で 2 に戻らない");
+    ng(Core.migrateToV3(null).migrated, "読めないデータでも落ちない");
   });
 
   out("---- " + pass + " PASS / " + fail + " FAIL ----");
@@ -1117,14 +1215,22 @@ function runSelfTest(log) {
 
   /* ---------- TMR-012 / TMR-003 音（すべて WebAudio で合成、外部音源なし） ---------- */
   const Sound = {
-    ctx: null, master: null, unlocked: false, silent: null,
+    ctx: null, bus: null, comp: null, master: null, unlocked: false, silent: null, _active: [],
     unlock() {
       if (this.unlocked) return;
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) { this.unlocked = true; return; }
       this.ctx = new AC();
+      // TMR-043【1】 出力の経路はここで1つだけ作り、アプリ全体で使い回す（音を鳴らすたびに作らない）
+      // まとめ役のGain → コンプレッサー → マスターGain → destination
+      this.bus = this.ctx.createGain();
+      this.bus.gain.value = SOUND.BUS_GAIN;
+      this.comp = this.ctx.createDynamicsCompressor();
+      for (const k of Object.keys(SOUND.COMPRESSOR)) this.comp[k].value = SOUND.COMPRESSOR[k];
       this.master = this.ctx.createGain();
-      this.master.gain.value = Core.gainFor(state.settings.volume);
+      this.master.gain.value = Core.masterGainFor(state.settings.volume);
+      this.bus.connect(this.comp);
+      this.comp.connect(this.master);
       this.master.connect(this.ctx.destination);
       // TMR-003 無音オシレータ常駐（タブが「音を出している」扱いになり間引きが緩む）
       const osc = this.ctx.createOscillator(), g = this.ctx.createGain();
@@ -1133,36 +1239,47 @@ function runSelfTest(log) {
       this.unlocked = true;
       this.check();   // TMR-004 解錠時の動作確認音（作業中に鳴る音ではないので TMR-042 の4か所には数えない）
     },
-    setVolume(v) { if (this.master) this.master.gain.value = Core.gainFor(v); },
-    // 鳴っている音を即座に全部止める（TMR-042【5】の「重ねて鳴らさない」を担保する）
+    // TMR-043【1】 音量スライダーはマスターGainだけを動かす（0 で完全に無音）
+    setVolume(v) { if (this.master) this.master.gain.value = Core.masterGainFor(v); },
+    // 鳴っている音を全部止める（TMR-042【5】の「重ねて鳴らさない」を担保する）
+    // TMR-043【6】 いきなり切ると「プツッ」と鳴るので、終わり際と同じ 0.010秒でゼロへ絞ってから止める
     stopAll() {
-      (this._active || []).forEach(n => { try { n.stop(); } catch (e) {} });
+      const now = this.ctx ? this.ctx.currentTime : 0;
+      this._active.forEach(v => {
+        try {
+          v.g.gain.cancelScheduledValues(now);
+          v.g.gain.setValueAtTime(v.g.gain.value, now);
+          v.g.gain.linearRampToValueAtTime(0, now + SOUND.RELEASE_SEC);
+          v.o.stop(now + SOUND.RELEASE_SEC + 0.005);
+        } catch (e) {}
+      });
       this._active = [];
     },
     // TMR-004 / TMR-040 単発の確認音（解錠時と、音量スライダーから指を離したとき）
-    check() { this.stopAll(); this.notes([{ at: 0, freq: 659, dur: Core.CHECK_SEC, gain: 1 }]); },
-    // TMR-012 音色3種。発音の予定表（Core.cueSchedule）をそのまま鳴らすだけの層
+    check() { this.stopAll(); this.notes([{ at: 0, freq: 659, dur: Core.CHECK_SEC }]); },
+    // 発音の予定表（Core.cueSchedule）をそのまま鳴らすだけの層
+    // TMR-043【2】【3】【6】 1音 ＝ 三角波の和音3本 ＋ 矩形波3本。各オシレータに個別のGainを付けて、まとめ役のGainへ
     notes(schedule) {
       if (!this.ctx) return;
       if (this.ctx.state === "suspended") this.ctx.resume();
-      const tone = state.settings.tone;
-      const type = tone === "triangle" ? "triangle" : "sine";
       const t0 = this.ctx.currentTime + 0.02;
       for (const n of schedule) {
-        const freqs = tone === "chime" ? [n.freq, n.freq * 1.25, n.freq * 1.5] : [n.freq];
-        freqs.forEach(f => {
+        const s = t0 + n.at, e = s + n.dur;
+        for (const voice of Core.voicesFor(n.freq)) {
           const o = this.ctx.createOscillator(), g = this.ctx.createGain();
-          o.type = type; o.frequency.value = f;
-          const peak = Math.max(0.0002, 0.6 * n.gain / freqs.length);
-          const s = t0 + n.at, e = s + n.dur;
-          g.gain.setValueAtTime(0.0001, s);
-          g.gain.exponentialRampToValueAtTime(peak, s + Math.min(0.02, n.dur / 3));
-          g.gain.exponentialRampToValueAtTime(0.0001, e);
-          o.connect(g); g.connect(this.master);
-          o.start(s); o.stop(e + 0.02);
-          (this._active = this._active || []).push(o);
-          o.onended = () => { this._active = (this._active || []).filter(x => x !== o); };
-        });
+          o.type = voice.type; o.frequency.value = voice.freq;
+          g.gain.value = 0;
+          // 立ち上がり 0.003秒でゼロから最大へ → 保持 → 終わり際 0.010秒で最大からゼロへ（音の長さの内側で絞りきる）
+          g.gain.setValueAtTime(0, s);
+          g.gain.linearRampToValueAtTime(voice.gain, s + SOUND.ATTACK_SEC);
+          g.gain.setValueAtTime(voice.gain, e - SOUND.RELEASE_SEC);
+          g.gain.linearRampToValueAtTime(0, e);
+          o.connect(g); g.connect(this.bus);
+          o.start(s); o.stop(e + 0.005);
+          const v = { o, g };
+          this._active.push(v);
+          o.onended = () => { this._active = this._active.filter(x => x !== v); g.disconnect(); };
+        }
       }
     }
   };
@@ -1177,7 +1294,7 @@ function runSelfTest(log) {
     Sound.notes(schedule);   // 予定表どおり「3連のかたまり×2回」を鳴らし、約2.9秒で自ら止まる
   }
 
-  // TMR-040 / TMR-042【5】 試聴（本番とまったく同じ鳴り方を、いまの音色・いまの音量で）
+  // TMR-040 / TMR-042【5】 試聴（本番とまったく同じ鳴り方を、いまの音量で。TMR-043 で音色は1種に固定）
   const Preview = {
     kind: null, timer: null,
     labels: { start: "▶ 開始", toBreak: "▶ 作業→休憩", toWork: "▶ 休憩→作業", finish: "▶ 終了" },
@@ -1574,7 +1691,6 @@ function runSelfTest(log) {
     applyScale();
     $("setVolume").value = state.settings.volume;
     $("volumeVal").textContent = state.settings.volume;
-    $("setTone").value = state.settings.tone;
     $("setAutoFs").checked = !!state.settings.autoFullscreen;
     $("setRecovery").value = state.settings.recoveryWindowMin;
     $("setBreak").value = state.settings.defaultBreakMin;
@@ -1586,8 +1702,6 @@ function runSelfTest(log) {
   // TMR-040 動かしている最中は鳴らさない。指を離した瞬間だけ 0.3 秒の確認音を鳴らす
   $("setVolume").oninput = e => { state.settings.volume = Number(e.target.value); $("volumeVal").textContent = state.settings.volume; Sound.setVolume(state.settings.volume); persist(); };
   $("setVolume").onchange = () => { if (Sound.unlocked) { Preview.stop(); Sound.check(); } };
-  // TMR-040 音色を切り替えた瞬間には鳴らさない（試聴ボタンを押したときだけ鳴らす）
-  $("setTone").onchange = e => { state.settings.tone = e.target.value; persist(); };
   $("setAutoFs").onchange = e => { state.settings.autoFullscreen = e.target.checked; persist(); };
   $("setRecovery").onchange = e => { state.settings.recoveryWindowMin = Number(e.target.value); persist(); };
   $("setBreak").onchange = e => { state.settings.defaultBreakMin = Number(e.target.value); persist(); };
